@@ -1,12 +1,27 @@
 # Vectra
+Simple local vector engine
 
+## commands
+Create versdb
 
-## Api
-`vectra add 000001 open close hight low vol name=xxx...`
-Add stock to db
+`vectra create test d=5 t=f32`
 
-`vectra find code`
-Find stock in db
+Push ver to versdb
 
-`vectra wave`
-show the vectra wave
+`vectra insert test v1 v2 v3 v4 v5 name=xxx...`
+
+Query in versdb
+
+`vectra find test v1 v2 v3 v4 v5 limit=10 f=l1`
+
+## Vector distance calculation method
+|f|type|
+|---|---|
+|eu|Euclidean Distance|
+|l1|Manhattan Distance|
+|cd|Chebyshev Distance|
+|md|Minkowski Distance|
+|cs|Cosine Similarity|
+|js|Jaccard Similarity|
+|md|Mahalanobis Distance|
+|hd|Hamming Distance|
