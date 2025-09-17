@@ -120,13 +120,46 @@ impl Database {
         Ok(())
     }
 
+    pub fn save_to_path(&self, path: &str) -> io::Result<()> {
+        if let Some(parent) = std::path::Path::new(path).parent() { fs::create_dir_all(parent)?; }
+        let encoded = bincode::serialize(self).unwrap();
+        let mut file = File::create(path)?;
+        file.write_all(&encoded)?;
+        Ok(())
+    }
+
     pub fn load_from_dir(dir: &str, name: &str) -> io::Result<Self> {
-        let path = format!("{}/{}.bin", dir, name);
-        let mut file = File::open(path)?;
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)?;
-        let decoded: Database = bincode::deserialize(&buffer).unwrap();
-        Ok(decoded)
+        let primary_path = format!("{}/{}.bin", dir, name);
+        let mut base: Option<Database> = None;
+        if let Ok(mut file) = File::open(&primary_path) {
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer)?;
+            let decoded: Database = bincode::deserialize(&buffer).unwrap();
+            base = Some(decoded);
+        }
+        // scan shards: name_part_*.bin
+        let mut merged = if let Some(db) = base { db } else { Database::new(name.to_string(), 0) };
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                if let Ok(ft) = entry.file_type() {
+                    if !ft.is_file() { continue; }
+                }
+                let fname = entry.file_name();
+                let fname = fname.to_string_lossy();
+                if fname.starts_with(&format!("{}_part_", name)) && fname.ends_with(".bin") {
+                    if let Ok(mut f) = File::open(entry.path()) {
+                        let mut buf = Vec::new();
+                        f.read_to_end(&mut buf)?;
+                        let shard: Database = bincode::deserialize(&buf).unwrap();
+                        if merged.dimension == 0 { merged.dimension = shard.dimension; }
+                        if merged.dimension != shard.dimension { return Err(io::Error::new(io::ErrorKind::InvalidData, "dimension mismatch in shards")); }
+                        merged.vectors.extend(shard.vectors);
+                    }
+                }
+            }
+        }
+        if merged.dimension == 0 { return Err(io::Error::new(io::ErrorKind::NotFound, "database not found")); }
+        Ok(merged)
     }
 }
 
