@@ -2,10 +2,11 @@ mod ver;
 use clap::{Parser, Subcommand};
 use chrono::Utc;
 use ver::{Vector, MetadataEntry, MetadataValue, Database, Metric, distance};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use axum::{extract::{Path, State}, routing::{post, get}, Json, Router};
 use serde::{Serialize, Deserialize};
-use std::time::{Duration, Instant};
 use rusqlite::{Connection, types::ValueRef};
 use std::fs;
 
@@ -68,12 +69,21 @@ fn parse_meta(pairs: Vec<String>) -> Vec<MetadataEntry> {
 }
 
 #[derive(Clone)]
-struct AppState { dir: String, dbs: Arc<Mutex<std::collections::HashMap<String, CacheEntry>>>,
-                  cache_max_bytes: usize, flush_interval: Duration, cache_ttl: Duration }
+struct AppState {
+    dir: String,
+    dbs: Arc<Mutex<HashMap<String, CacheEntry>>>,
+    cache_max_bytes: usize,
+    flush_interval: Duration,
+    cache_ttl: Duration
+}
 
 struct CacheEntry { db: Database, last_access: Instant, dirty: bool }
 
-fn evict_if_needed(map: &mut std::collections::HashMap<String, CacheEntry>, max_bytes: usize, ttl: Duration) {
+fn evict_if_needed(
+    map: &mut HashMap<String, CacheEntry>,
+    max_bytes: usize,
+    ttl: Duration
+) {
     // TTL eviction
     let now = Instant::now();
     let keys_to_remove: Vec<String> = map.iter()
@@ -128,16 +138,16 @@ fn map_value_ref_to_metadata(v: ValueRef<'_>) -> Option<MetadataValue> {
 struct CreateReq { name: String, dimension: usize }
 
 #[derive(Deserialize)]
-struct InsertReq { values: Vec<f64>, meta: std::collections::HashMap<String, String> }
+struct InsertReq { values: Vec<f64>, meta: HashMap<String, String> }
 
 #[derive(Deserialize)]
 struct FindReq { values: Vec<f64>, k: Option<usize>, f: Option<String> }
 
 #[derive(Serialize)]
-struct FindItem { index: usize, distance: f64, values: Vec<f64>, metadata: std::collections::HashMap<String, String> }
+struct FindItem { index: usize, distance: f64, values: Vec<f64>, metadata: HashMap<String, String> }
 
 #[derive(Serialize)]
-struct InfoResp { name: String, dimension: usize, count: usize, metadata_schema: std::collections::HashMap<String, Vec<String>> }
+struct InfoResp { name: String, dimension: usize, count: usize, metadata_schema: HashMap<String, Vec<String>> }
 
 async fn create_db(State(state): State<AppState>, Json(req): Json<CreateReq>) -> Result<Json<serde_json::Value>, String> {
     let mut map = state.dbs.lock().map_err(|_| "lock")?;
@@ -164,7 +174,6 @@ async fn insert_vec(State(state): State<AppState>, Path(name): Path<String>, Jso
     entry.dirty = true;
     entry.last_access = Instant::now();
     let total = entry.db.vectors.len();
-    let _ = entry;
     evict_if_needed(&mut map, state.cache_max_bytes, state.cache_ttl);
     Ok(Json(serde_json::json!({"ok": true, "total": total})))
 }
@@ -181,11 +190,11 @@ async fn find_vec(State(state): State<AppState>, Path(name): Path<String>, Json(
     let mut scored: Vec<(usize, f64)> = entry.db.vectors.iter().enumerate()
         .map(|(i, v)| (i, distance(v.data(), &req.values, &metric)))
         .collect();
-    scored.sort_by(|a,b| a.1.partial_cmp(&b.1).unwrap());
+    scored.sort_by(|a,b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
     let k = req.k.unwrap_or(10);
     let mut res = Vec::new();
     for (idx, dist) in scored.into_iter().take(k) {
-        let mut meta_map = std::collections::HashMap::new();
+        let mut meta_map = HashMap::new();
         for m in entry.db.vectors[idx].metadata() { meta_map.insert(m.key().to_string(), m.value().to_string()); }
         let values = entry.db.vectors[idx].data().to_vec();
         res.push(FindItem { index: idx, distance: dist, values, metadata: meta_map });
@@ -205,7 +214,7 @@ fn metadata_type_name(v: &MetadataValue) -> &'static str {
     }
 }
 
-fn build_metadata_schema(db: &Database) -> std::collections::HashMap<String, Vec<String>> {
+fn build_metadata_schema(db: &Database) -> HashMap<String, Vec<String>> {
     use std::collections::{HashMap, HashSet};
     let mut m: HashMap<String, HashSet<&'static str>> = HashMap::new();
     for v in &db.vectors {
@@ -276,7 +285,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
             m.push(MetadataEntry::new("created_at".to_string(), MetadataValue::DateTime(Utc::now())));
             let v = Vector::new(values, m);
             db.insert(v)?;
-            println!("ok: inserted one vector (total={})", db.vectors.len());
             db.save_to_dir(&cli.dir)?;
             println!("inserted into '{}' (total={})", name, db.vectors.len());
         }
@@ -287,7 +295,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
             let mut scored: Vec<(usize, f64)> = db.vectors.iter().enumerate()
                 .map(|(i, v)| (i, distance(v.data(), &values, &metric)))
                 .collect();
-            scored.sort_by(|a,b| a.1.partial_cmp(&b.1).unwrap());
+            scored.sort_by(|a,b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             for (i,(idx, dist)) in scored.into_iter().take(k).enumerate() {
                 let v = &db.vectors[idx];
                 let src = v.metadata().iter().find(|m| m.key() == "source").map(|m| m.value().to_string()).unwrap_or_else(|| "".to_string());
@@ -295,7 +303,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
             }
         }
         Commands::Serve { addr, cache_max_mb, flush_interval_sec, cache_ttl_sec } => {
-            let state = AppState { dir: cli.dir.clone(), dbs: Arc::new(Mutex::new(std::collections::HashMap::new())), cache_max_bytes: cache_max_mb * 1024 * 1024, flush_interval: Duration::from_secs(flush_interval_sec), cache_ttl: Duration::from_secs(cache_ttl_sec) };
+            let state = AppState {
+                dir: cli.dir.clone(),
+                dbs: Arc::new(Mutex::new(HashMap::new())),
+                cache_max_bytes: cache_max_mb * 1024 * 1024,
+                flush_interval: Duration::from_secs(flush_interval_sec),
+                cache_ttl: Duration::from_secs(cache_ttl_sec)
+            };
             // background flush task
             let state_clone = state.clone();
             tokio::spawn(async move {
@@ -396,5 +410,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
         }
     }
     Ok(())
-}
 }
