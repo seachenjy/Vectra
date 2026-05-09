@@ -1,165 +1,286 @@
-# Vectra
-Simple local vector engine | 本地向量引擎
+# SkyMemory
 
-## CLI Usage | 命令行用法
+认知记忆引擎 | Cognitive Memory Engine
 
-- Build & Run | 构建运行
-```
-cargo run -- --help
-```
+SkyMemory 是一个本地优先的认知记忆引擎，融合向量索引、图记忆、时间衰减与语义查询，为 AI Agent 提供类人记忆能力。
 
-- Create DB | 创建数据库
-```
-cargo run -- create <name> -d <dimension> [--dir data]
-# example 示例
-cargo run -- create test -d 3
-```
+## 架构概览
 
-- Insert vector | 插入向量
 ```
-cargo run -- insert <name> -v <v1> <v2> ... [-m k=v,k2=v2] [--dir data]
-# examples 示例
-cargo run -- insert test -v 1 2 3 -m source=s1
-cargo run -- insert test -v 1,2,3 -m source=s1,owner=me
+┌─────────────────────────────────────────────────────────┐
+│   CLI (clap)          REST API (axum)     Admin Panel   │
+├─────────────────────────────────────────────────────────┤
+│                   Query Engine                          │
+│          (语义解析 + 多路召回 + 评分融合)                  │
+├──────────┬──────────┬───────────┬───────────────────────┤
+│  Vector  │  Graph   │ Property  │      Temporal         │
+│  (HNSW)  │  (CSR)   │ (Column)  │   (Decay/Consolidate) │
+├──────────┴──────────┴───────────┴───────────────────────┤
+│                 Storage Engine                           │
+│            (Segment + WAL + mmap)                        │
+└─────────────────────────────────────────────────────────┘
 ```
 
-- Find nearest | 查询近邻
-```
-cargo run -- find <name> -v <v1> <v2> ... [-k 10] [-f eu] [--dir data]
-# examples 示例
-cargo run -- find test -v 1 2 3 -k 5 -f eu
-cargo run -- find test -v 1,2,3 -k 5 -f cs
-```
+## Workspace 结构
 
-Notes | 说明：
-- Default data dir is `data/`, configurable via `--dir` | 默认数据目录为 `data/`，可用 `--dir` 指定
-- Metadata `-m` supports multiple or comma-separated | 元数据 `-m` 支持多次或逗号分隔
-- Supported metrics | 支持的度量：`eu`(欧氏)、`l1`(曼哈顿)、`cs`(余弦，返回 1-cosine)
+| Crate | 说明 |
+|-------|------|
+| `skymemory` | CLI 入口 + 服务器启动 |
+| `crates/core` | 共享类型、错误定义 |
+| `crates/storage` | 段式存储引擎 + WAL 预写日志 |
+| `crates/vector` | HNSW 向量索引 + AVX2 SIMD 距离计算 |
+| `crates/graph` | CSR 压缩邻接图 + BFS 遍历 + 扩散激活 |
+| `crates/property` | 列式属性存储 + 范围查询索引 |
+| `crates/temporal` | 艾宾浩斯衰减 + 冷热分离 + 记忆巩固 |
+| `crates/query` | DSL 解析器 + 多路查询规划器 |
+| `crates/api` | axum REST API + CORS |
+| `crates/import_export` | JSONL / CSV / SkyArchive 导入导出 |
+| `crates/backup` | 快照备份与恢复 |
+| `admin/` | Vue 3 管理看板 |
 
-## REST Server | REST 服务
+## 快速开始
 
-- Start server | 启动服务
-```
-cargo run -- serve --addr 127.0.0.1:8080 [--dir data]
-```
+### 构建
 
-- Create DB
-```
-POST /create
-{"name":"test","dimension":3}
-
-200 OK
-{"ok":true}
+```bash
+cargo build --release
 ```
 
-- Insert vector
-```
-POST /db/{name}/insert
-{"values":[1,2,3],"meta":{"source":"s1"}}
+### CLI 用法
 
-200 OK
-{"ok":true,"total":1}
-```
+```bash
+# 插入记忆
+skymemory insert 0.1 0.2 0.3 --meta source=demo,topic=test --memory-type semantic
 
-- Find nearest
-```
-POST /db/{name}/find
-{"values":[1.1,1.9,3.2],"k":5,"f":"eu"}
+# 向量搜索
+skymemory search 0.1 0.2 0.3 -k 10 -m cs
 
-200 OK
-[
-  {"index":0,"distance":0.244...,"values":[1.0,2.0,3.0],"metadata":{"source":"s1","created_at":"..."}}
-]
-```
+# 语义查询
+skymemory query "BOOST recent" -k 5
 
-Server flags | 服务参数：
-```
---addr 127.0.0.1:8080         # listen address | 监听地址
---dir data                    # data directory | 数据目录
---cache-max-mb 128            # memory cap for cache in MB | 缓存最大内存（MB）
---flush-interval-sec 5        # background flush interval | 后台落盘间隔（秒）
---cache-ttl-sec 600           # TTL for idle DBs | 空闲库的生存时间（秒）
-```
-Notes | 说明：服务内置读通+写回缓存、LRU+TTL 逐出，定期 flush 到磁盘；需要严格一致性可联系维护者启用写穿策略选项。
+# 建立关系
+skymemory edge 123456 789012 --edge-type similar_to --weight 0.9
 
-## Import from SQLite | 从 SQLite 导入
+# 查看系统信息
+skymemory info
 
-- Command | 命令
-```
-cargo run -- import-sqlite \
-  --sqlite data.db \
-  --table my_table \
-  --name test \
-  --vec-cols v1,v2,v3 \
-  --meta-cols source=src_col,owner=user_col \
-  --batch-size 200000
+# 导出数据
+skymemory export -o backup.json
+
+# 导入数据
+skymemory import -p data.jsonl --format jsonl
+
+# 创建快照
+skymemory backup
+
+# 恢复快照
+skymemory restore snap_1234567890
+
+# 查看所有备份
+skymemory list-backups
 ```
 
-- Behavior | 行为
-- **vec_cols**: columns parsed as vector values `f64`（支持整数/浮点/可解析字符串）
-- **meta_cols**: `key=column` mappings; values auto-typed to MetadataValue：
-  - Integer → `Integer(i32)`
-  - Real → `Float(f32)`
-  - Text → `Bool(true/false/1/0)` | `DateTime(RFC3339)` | fallback `String`
-- Chunked import into shards `data/<name>_part_*.bin` (configurable by `--batch-size`) | 分片导入保存为多个分片（由 `--batch-size` 控制）
+### 启动 REST 服务
 
-- Example | 示例
-```
-cargo run -- import-sqlite --sqlite data.db --table items \
-  --name products --vec-cols f1,f2,f3 \
-  --meta-cols source=src,category=cat,created_at=ts \
-  --batch-size 100000
-
-## DB Info | 库信息
-
-- CLI
-```
-cargo run -- info <name>
-# example 示例
-cargo run -- info daily
+```bash
+skymemory serve --addr 127.0.0.1:8080
 ```
 
-- REST
+### 启动管理看板
+
+```bash
+cd admin
+npm install
+npm run dev
+# → http://localhost:3000
 ```
-GET /db/{name}/info
 
-200 OK
-{"name":"daily","dimension":6,"count":6290936,
-  "metadata_schema":{"ts_code":["String"],"trade_date":["String"],"created_at":["DateTime"]}}
+管理看板通过 Vite 代理将 `/api` 请求转发到后端 `:8080`。
+
+## REST API
+
+### 记忆管理
+
+```bash
+# 插入记忆
+POST /api/memories
+{"vector":[0.1,0.2,0.3], "metadata":{"source":"demo"}, "memory_type":"semantic"}
+
+# 获取记忆
+GET /api/memories/{id}
+
+# 删除记忆
+DELETE /api/memories/{id}
+
+# 记录访问（增强衰减分数）
+POST /api/memories/{id}/access
 ```
+
+### 搜索与查询
+
+```bash
+# 向量相似搜索
+POST /api/search
+{"vector":[0.1,0.2,0.3], "k":10, "metric":"cs"}
+
+# 语义查询
+POST /api/query
+{"query":"BOOST recent AND category=test", "k":5, "metric":"cs"}
 ```
 
-## Metrics | 距离/相似度函数
-| f | type |
-|---|---|
-| eu | Euclidean Distance |
-| l1 | Manhattan Distance |
-| cs | Cosine (reported as 1 - cosine) |
+### 图操作
 
-Planned | 规划中：`cd` Chebyshev, `md` Minkowski, `js` Jaccard, `mh` Mahalanobis, `hd` Hamming
+```bash
+# 添加边
+POST /api/edges
+{"from":123, "to":456, "edge_type":"similar_to", "weight":0.9}
 
-## Optimization Log | 优化日志
+# 获取节点的边
+GET /api/edges/{id}
 
-### 2024-09-22 Code Optimization | 代码优化
+# 图遍历
+POST /api/graph/traverse
+{"start":123, "depth":2, "edge_type":"similar_to"}
 
-**Configuration Fixes | 配置修复**
-- Fixed `Cargo.toml` edition from "2024" to "2021" | 修复 Cargo.toml 版本从 "2024" 到 "2021"
-- Resolved compilation errors with extra closing brace | 解决多余右括号导致的编译错误
+# 扩散激活
+POST /api/graph/activate
+{"start":123, "decay_factor":0.5, "threshold":0.1, "max_hops":3}
+```
 
-**Code Structure Improvements | 代码结构改进**
-- Unified `std::collections::HashMap` imports for consistency | 统一 HashMap 导入提升一致性
-- Removed redundant imports and unnecessary variable bindings | 移除重复导入和不必要的变量绑定
-- Improved error handling with `unwrap_or(std::cmp::Ordering::Equal)` | 改进错误处理避免潜在panic
-- Optimized memory estimation using `std::mem::size_of_val()` | 优化内存估算使用标准库函数
+### 系统信息
 
-**Performance Enhancements | 性能优化**
-- Enhanced caching system with LRU+TTL eviction strategies | 增强缓存系统支持LRU+TTL双重淘汰
-- Async background data flushing mechanism | 异步后台数据刷新机制
-- Vector computation optimization for multiple distance metrics | 向量计算优化支持多种距离度量
-- Sharded storage support for large datasets | 分片存储支持大数据集
+```bash
+# 系统信息（节点数、边数、维度、属性 Schema）
+GET /api/info
 
-**Code Quality | 代码质量**
-- All compilation errors fixed | 修复所有编译错误
-- Clippy warnings reduced to non-critical issues | Clippy警告减少至非关键问题
-- Tests passing (0 test cases currently) | 测试通过（当前无单元测试）
-- Ready for production use | 可用于生产环境
+# 系统指标（热/冷记忆统计）
+GET /api/metrics
+```
+
+### 备份与导入导出
+
+```bash
+# 创建快照
+POST /api/backup
+{"action":"create"}
+
+# 恢复快照
+POST /api/backup
+{"action":"restore", "snapshot_id":"snap_xxx"}
+
+# 列出备份
+GET /api/backups
+
+# 导入
+POST /api/import
+{"format":"jsonl", "path":"/path/to/data.jsonl"}
+
+# 导出（返回 SkyArchive JSON）
+POST /api/export
+```
+
+## 距离度量
+
+| 代码 | 名称 | 说明 |
+|------|------|------|
+| `eu` | Euclidean | 欧氏距离 |
+| `cs` | Cosine | 余弦距离 (1 - cos) |
+| `dot` | Dot Product | 负点积距离 |
+
+向量距离计算支持 x86_64 AVX2 SIMD 加速。
+
+## 语义查询 DSL
+
+查询语法支持以下操作符组合：
+
+```
+VECTOR_SIMILAR("text")     向量相似搜索
+key = value                 属性精确过滤
+key > value                 属性范围过滤
+BOOST recent [weight]       时间近因性加权
+EXPAND depth=N              图关系扩展
+A AND B                     交集
+A OR B                      并集
+```
+
+示例：
+
+```bash
+# 搜索最近的语义记忆
+skymemory query "BOOST recent" -k 10
+
+# 属性过滤 + 时间加权
+skymemory query "category = technology AND BOOST recent 2.0" -k 5
+
+# 图扩展查询
+skymemory query "EXPAND depth=2" -k 10
+```
+
+## 记忆类型
+
+| 类型 | 说明 |
+|------|------|
+| `Semantic` | 语义记忆 — 事实性知识，衰减较慢 |
+| `Episodic` | 情景记忆 — 事件性记录，依赖访问频率维持 |
+
+## 边类型
+
+| 类型 | 说明 |
+|------|------|
+| `SimilarTo` | 相似关系 |
+| `DerivedFrom` | 派生关系 |
+| `PartOf` | 组成关系 |
+| `TemporallyAfter` | 时序关系 |
+| `Contradicts` | 矛盾关系 |
+| `References` | 引用关系 |
+
+## 存储格式
+
+### SkyArchive (.json)
+
+导出格式为标准 JSON，包含 manifest + 完整节点数据：
+
+```json
+{
+  "manifest": {
+    "version": "0.2.0",
+    "node_count": 100,
+    "dimension": 128,
+    "created_at": 1700000000000
+  },
+  "nodes": [...]
+}
+```
+
+### 数据目录结构
+
+```
+data/
+├── segments/
+│   └── seg_xxx/
+│       ├── vectors.bin    序列化节点数据
+│       ├── meta.json      段元信息
+│       └── wal.log        预写日志
+└── backups/
+    └── snap_xxx.json      快照文件
+```
+
+## 技术栈
+
+**后端 (Rust)**
+- axum + tokio — 异步 HTTP 服务
+- HNSW — 近似最近邻索引
+- AVX2 SIMD — 向量距离加速
+- bincode — 高效二进制序列化
+- rayon — 并行计算
+
+**前端 (Vue 3)**
+- Vue 3 + Composition API + TypeScript
+- Pinia 状态管理
+- Vue Router 路由懒加载
+- Axios API 调用
+- Vite 构建
+
+## License
+
+MIT
