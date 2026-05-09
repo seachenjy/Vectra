@@ -39,6 +39,31 @@ export interface EdgeItem {
   weight: number
 }
 
+// ── Database types ──────────────────────────────────────────
+
+export interface DbConnectionInfo {
+  name: string
+  db_type: string
+  dsn_display: string
+  connected: boolean
+}
+
+export interface DbQueryResult {
+  columns: string[]
+  column_types: string[]
+  rows: any[][]
+  row_count: number
+  elapsed_ms: number
+}
+
+export interface DbImportResult {
+  ok: boolean
+  imported: number
+  total_rows: number
+  errors?: string[]
+  error?: string
+}
+
 export function useApi() {
   async function getInfo(): Promise<InfoResp> {
     const { data } = await client.get('/api/info')
@@ -146,6 +171,59 @@ export function useApi() {
     return data
   }
 
+  // ── Database API ────────────────────────────────────────────
+
+  async function dbConnect(payload: {
+    name: string
+    db_type: string
+    dsn: string
+    max_connections?: number
+  }): Promise<{ ok?: boolean; error?: string }> {
+    const { data } = await client.post('/api/db/connect', payload)
+    return data
+  }
+
+  async function dbDisconnect(name: string): Promise<{ ok?: boolean; error?: string }> {
+    const { data } = await client.post('/api/db/disconnect', { name })
+    return data
+  }
+
+  async function dbListConnections(): Promise<DbConnectionInfo[]> {
+    const { data } = await client.get('/api/db/connections')
+    return data
+  }
+
+  async function dbQuery(connection: string, sql: string): Promise<{ ok?: boolean; data?: DbQueryResult; error?: string }> {
+    const { data } = await client.post('/api/db/query', { connection, sql })
+    return data
+  }
+
+  async function dbListTables(name: string): Promise<{ ok?: boolean; tables?: string[]; error?: string }> {
+    const { data } = await client.post('/api/db/tables', { name })
+    return data
+  }
+
+  async function dbDescribeTable(connection: string, table: string): Promise<{ ok?: boolean; data?: DbQueryResult; error?: string }> {
+    const { data } = await client.post('/api/db/describe', { connection, table })
+    return data
+  }
+
+  async function dbTestConnection(name: string): Promise<{ ok?: boolean; alive?: boolean; error?: string }> {
+    const { data } = await client.post('/api/db/test', { name })
+    return data
+  }
+
+  async function dbImportToVector(payload: {
+    connection: string
+    sql: string
+    vector_column: string
+    metadata_columns?: string[]
+    memory_type?: string
+  }): Promise<DbImportResult> {
+    const { data } = await client.post('/api/db/import', payload)
+    return data
+  }
+
   return {
     getInfo,
     getMetrics,
@@ -163,5 +241,13 @@ export function useApi() {
     listBackups,
     handleImport,
     handleExport,
+    dbConnect,
+    dbDisconnect,
+    dbListConnections,
+    dbQuery,
+    dbListTables,
+    dbDescribeTable,
+    dbTestConnection,
+    dbImportToVector,
   }
 }

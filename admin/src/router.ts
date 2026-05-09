@@ -32,6 +32,11 @@ const router = createRouter({
       name: 'backup',
       component: () => import('./views/BackupView.vue'),
     },
+    {
+      path: '/database',
+      name: 'database',
+      component: () => import('./views/DatabaseView.vue'),
+    },
   ],
 })
 

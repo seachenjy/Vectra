@@ -11,6 +11,7 @@ const navItems = [
   { path: '/memories', label: '记忆管理', icon: '🧠' },
   { path: '/graph', label: '图谱可视化', icon: '🔗' },
   { path: '/query', label: '查询控制台', icon: '🔍' },
+  { path: '/database', label: '数据库导入', icon: '🗄' },
   { path: '/backup', label: '备份管理', icon: '💾' },
 ]
 

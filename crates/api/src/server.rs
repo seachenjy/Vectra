@@ -10,6 +10,7 @@ use skymemory_query::QueryEngine;
 use skymemory_query::parse_query;
 use skymemory_backup::BackupManager;
 use skymemory_import_export as import_export;
+use skymemory_database::{DatabaseManager, DbConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -21,6 +22,7 @@ struct EngineState {
     engine: RwLock<QueryEngine>,
     backup: BackupManager,
     dimension: usize,
+    db_manager: DatabaseManager,
 }
 
 type AppState = Arc<EngineState>;
@@ -30,6 +32,7 @@ pub fn build_router(engine: QueryEngine, backup: BackupManager, dimension: usize
         engine: RwLock::new(engine),
         backup,
         dimension,
+        db_manager: DatabaseManager::new(),
     });
 
     let cors = CorsLayer::new()
@@ -54,6 +57,15 @@ pub fn build_router(engine: QueryEngine, backup: BackupManager, dimension: usize
         .route("/api/export", post(handle_export))
         .route("/api/graph/traverse", post(graph_traverse))
         .route("/api/graph/activate", post(spreading_activation))
+        // Database routes
+        .route("/api/db/connect", post(db_connect))
+        .route("/api/db/disconnect", post(db_disconnect))
+        .route("/api/db/connections", get(db_list_connections))
+        .route("/api/db/query", post(db_query))
+        .route("/api/db/tables", post(db_list_tables))
+        .route("/api/db/describe", post(db_describe_table))
+        .route("/api/db/test", post(db_test_connection))
+        .route("/api/db/import", post(db_import_to_vector))
         .layer(cors)
         .with_state(state)
 }
@@ -409,4 +421,216 @@ async fn spreading_activation(
     Json(json!(result.iter().map(|(id, activation)| {
         json!({"id": id, "activation": activation})
     }).collect::<Vec<_>>()))
+}
+
+// ── Database handlers ───────────────────────────────────────
+
+async fn db_connect(
+    State(state): State<AppState>,
+    Json(req): Json<DbConnectReq>,
+) -> impl IntoResponse {
+    let config = DbConfig {
+        name: req.name,
+        db_type: req.db_type,
+        dsn: req.dsn,
+        max_connections: req.max_connections,
+    };
+    match state.db_manager.connect(config).await {
+        Ok(()) => Json(json!({"ok": true})),
+        Err(e) => Json(json!({"error": e.to_string()})),
+    }
+}
+
+async fn db_disconnect(
+    State(state): State<AppState>,
+    Json(req): Json<DbDisconnectReq>,
+) -> impl IntoResponse {
+    match state.db_manager.disconnect(&req.name).await {
+        Ok(()) => Json(json!({"ok": true})),
+        Err(e) => Json(json!({"error": e.to_string()})),
+    }
+}
+
+async fn db_list_connections(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let list = state.db_manager.list_connections().await;
+    Json(json!(list))
+}
+
+async fn db_query(
+    State(state): State<AppState>,
+    Json(req): Json<DbQueryReq>,
+) -> impl IntoResponse {
+    match state.db_manager.query(&req.connection, &req.sql).await {
+        Ok(result) => Json(json!({"ok": true, "data": result})),
+        Err(e) => Json(json!({"error": e.to_string()})),
+    }
+}
+
+async fn db_list_tables(
+    State(state): State<AppState>,
+    Json(req): Json<DbDisconnectReq>,
+) -> impl IntoResponse {
+    match state.db_manager.list_tables(&req.name).await {
+        Ok(tables) => Json(json!({"ok": true, "tables": tables})),
+        Err(e) => Json(json!({"error": e.to_string()})),
+    }
+}
+
+async fn db_describe_table(
+    State(state): State<AppState>,
+    Json(req): Json<DbTableReq>,
+) -> impl IntoResponse {
+    match state.db_manager.describe_table(&req.connection, &req.table).await {
+        Ok(result) => Json(json!({"ok": true, "data": result})),
+        Err(e) => Json(json!({"error": e.to_string()})),
+    }
+}
+
+async fn db_test_connection(
+    State(state): State<AppState>,
+    Json(req): Json<DbDisconnectReq>,
+) -> impl IntoResponse {
+    match state.db_manager.test_connection(&req.name).await {
+        Ok(alive) => Json(json!({"ok": true, "alive": alive})),
+        Err(e) => Json(json!({"error": e.to_string()})),
+    }
+}
+
+async fn db_import_to_vector(
+    State(state): State<AppState>,
+    Json(req): Json<DbImportReq>,
+) -> impl IntoResponse {
+    // Step 1: Execute the SQL query against the external DB
+    let query_result = match state.db_manager.query(&req.connection, &req.sql).await {
+        Ok(r) => r,
+        Err(e) => return Json(json!({"error": format!("query failed: {}", e)})),
+    };
+
+    if query_result.rows.is_empty() {
+        return Json(json!({"ok": true, "imported": 0, "message": "query returned no rows"}));
+    }
+
+    // Find the vector column index
+    let vec_col_idx = match query_result.columns.iter().position(|c| c == &req.vector_column) {
+        Some(idx) => idx,
+        None => return Json(json!({"error": format!("vector column '{}' not found in query results. available columns: {:?}", req.vector_column, query_result.columns)})),
+    };
+
+    // Determine metadata column indices
+    let meta_col_indices: Vec<(usize, String)> = match &req.metadata_columns {
+        Some(cols) if !cols.is_empty() => {
+            cols.iter().filter_map(|name| {
+                query_result.columns.iter().position(|c| c == name)
+                    .map(|idx| (idx, name.clone()))
+            }).collect()
+        }
+        _ => {
+            // Use all columns except the vector column
+            query_result.columns.iter().enumerate()
+                .filter(|(i, _)| *i != vec_col_idx)
+                .map(|(i, name)| (i, name.clone()))
+                .collect()
+        }
+    };
+
+    let mem_type = match req.memory_type.as_deref() {
+        Some("episodic") => MemoryType::Episodic,
+        _ => MemoryType::Semantic,
+    };
+
+    let engine = state.engine.write().await;
+    let mut imported = 0usize;
+    let mut errors = Vec::new();
+    let expected_dim = state.dimension;
+
+    for (row_idx, row) in query_result.rows.iter().enumerate() {
+        // Parse vector from the designated column
+        let vector = match parse_vector_value(&row[vec_col_idx]) {
+            Some(v) => v,
+            None => {
+                errors.push(format!("row {}: cannot parse vector from column '{}'", row_idx, req.vector_column));
+                continue;
+            }
+        };
+
+        if vector.len() != expected_dim {
+            errors.push(format!("row {}: dimension mismatch: expected {}, got {}", row_idx, expected_dim, vector.len()));
+            continue;
+        }
+
+        // Build metadata from other columns
+        let mut properties: Vec<Property> = Vec::new();
+        for (col_idx, col_name) in &meta_col_indices {
+            if *col_idx < row.len() {
+                let val_str = json_value_to_string(&row[*col_idx]);
+                properties.push(Property {
+                    key: col_name.clone(),
+                    value: Value::String(val_str),
+                });
+            }
+        }
+        properties.push(Property {
+            key: "source".into(),
+            value: Value::String("database_import".into()),
+        });
+
+        let node = MemoryNode {
+            id: generate_node_id(),
+            vector,
+            properties,
+            temporal: TemporalInfo::default(),
+            memory_type: mem_type,
+        };
+
+        match engine.insert_node(node) {
+            Ok(()) => imported += 1,
+            Err(e) => errors.push(format!("row {}: insert failed: {}", row_idx, e)),
+        }
+    }
+
+    let mut resp = json!({"ok": true, "imported": imported, "total_rows": query_result.row_count});
+    if !errors.is_empty() {
+        resp["errors"] = json!(errors);
+    }
+    Json(resp)
+}
+
+/// Parse a JSON value into a Vec<f32> vector.
+/// Supports:
+/// - JSON array of numbers: [0.1, 0.2, 0.3]
+/// - String of comma-separated numbers: "0.1,0.2,0.3"
+/// - String of JSON array: "[0.1, 0.2, 0.3]"
+fn parse_vector_value(val: &serde_json::Value) -> Option<Vec<f32>> {
+    match val {
+        serde_json::Value::Array(arr) => {
+            let v: Vec<f32> = arr.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect();
+            if v.len() == arr.len() { Some(v) } else { None }
+        }
+        serde_json::Value::String(s) => {
+            let s = s.trim();
+            // Try JSON array first
+            if s.starts_with('[') {
+                if let Ok(arr) = serde_json::from_str::<Vec<f32>>(s) {
+                    return Some(arr);
+                }
+            }
+            // Try comma-separated
+            let v: Vec<f32> = s.split(',')
+                .map(|x| x.trim().parse::<f32>())
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?;
+            if v.is_empty() { None } else { Some(v) }
+        }
+        _ => None,
+    }
+}
+
+fn json_value_to_string(val: &serde_json::Value) -> String {
+    match val {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    }
 }

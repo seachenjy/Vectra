@@ -80,3 +80,43 @@ pub struct SnapshotReq {
     pub action: String,
     pub snapshot_id: Option<String>,
 }
+
+// ── Database types ──────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct DbConnectReq {
+    pub name: String,
+    pub db_type: String,
+    pub dsn: String,
+    pub max_connections: Option<u32>,
+}
+
+#[derive(Deserialize)]
+pub struct DbQueryReq {
+    pub connection: String,
+    pub sql: String,
+}
+
+#[derive(Deserialize)]
+pub struct DbDisconnectReq {
+    pub name: String,
+}
+
+#[derive(Deserialize)]
+pub struct DbTableReq {
+    pub connection: String,
+    pub table: String,
+}
+
+/// Request to import SQL query results into the vector store
+#[derive(Deserialize)]
+pub struct DbImportReq {
+    pub connection: String,
+    pub sql: String,
+    /// Column name that contains the vector data (comma-separated floats or JSON array)
+    pub vector_column: String,
+    /// Columns to store as metadata (if empty, all non-vector columns are used)
+    pub metadata_columns: Option<Vec<String>>,
+    /// Memory type: "semantic" or "episodic"
+    pub memory_type: Option<String>,
+}
