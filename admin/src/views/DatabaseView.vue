@@ -5,7 +5,6 @@ import type { DbConnectionInfo, DbQueryResult } from '../composables/useApi'
 
 const api = useApi()
 
-// ── Connection state ────────────────────────────────────────
 const connections = ref<DbConnectionInfo[]>([])
 const activeConn = ref<string | null>(null)
 
@@ -18,17 +17,14 @@ const connectForm = ref({
 
 const showConnectForm = ref(false)
 
-// ── Query state ─────────────────────────────────────────────
 const sqlText = ref('')
 const queryResult = ref<DbQueryResult | null>(null)
 const queryLoading = ref(false)
 
-// ── Table browser state ─────────────────────────────────────
 const tables = ref<string[]>([])
 const selectedTable = ref<string | null>(null)
 const tableSchema = ref<DbQueryResult | null>(null)
 
-// ── Import state ────────────────────────────────────────────
 const showImportPanel = ref(false)
 const importForm = ref({
   vector_column: '',
@@ -36,7 +32,6 @@ const importForm = ref({
   memory_type: 'semantic',
 })
 
-// ── General UI state ────────────────────────────────────────
 const loading = ref(false)
 const error = ref<string | null>(null)
 const success = ref<string | null>(null)
@@ -52,12 +47,10 @@ const dsnPlaceholder = computed(() => {
 
 const hasActiveConnection = computed(() => activeConn.value !== null)
 
-// ── Lifecycle ───────────────────────────────────────────────
 onMounted(async () => {
   await refreshConnections()
 })
 
-// ── Connection actions ──────────────────────────────────────
 async function refreshConnections() {
   try {
     connections.value = await api.dbListConnections()
@@ -146,7 +139,6 @@ async function testConnection(name: string) {
   }
 }
 
-// ── Table browser actions ───────────────────────────────────
 async function loadTables() {
   if (!activeConn.value) return
   try {
@@ -181,7 +173,6 @@ function previewTable(table: string) {
   doQuery()
 }
 
-// ── Query actions ───────────────────────────────────────────
 async function doQuery() {
   if (!activeConn.value || !sqlText.value.trim()) {
     error.value = '请选择连接并输入 SQL'
@@ -206,14 +197,12 @@ async function doQuery() {
   }
 }
 
-// ── Import actions ──────────────────────────────────────────
 function openImportPanel() {
   if (!queryResult.value || queryResult.value.row_count === 0) {
     error.value = '请先执行查询获取数据'
     return
   }
   showImportPanel.value = true
-  // Auto-suggest first column as vector column
   if (queryResult.value.columns.length > 0 && !importForm.value.vector_column) {
     importForm.value.vector_column = queryResult.value.columns[0]
   }
@@ -270,109 +259,123 @@ function clearMessages() {
 </script>
 
 <template>
-  <div class="db-view" @click="clearMessages">
-    <!-- Alerts -->
-    <div v-if="error" class="alert error" @click.stop>{{ error }}</div>
-    <div v-if="success" class="alert success" @click.stop>{{ success }}</div>
+  <div class="flex flex-col gap-4" @click="clearMessages">
+    <div v-if="error" class="px-4 py-2.5 bg-red-900/50 border border-red-600 rounded-lg text-red-400 text-sm" @click.stop>{{ error }}</div>
+    <div v-if="success" class="px-4 py-2.5 bg-green-900/50 border border-green-600 rounded-lg text-green-400 text-sm" @click.stop>{{ success }}</div>
 
-    <!-- Top: Connection management -->
-    <div class="section-card">
-      <div class="section-header">
-        <h3>数据库连接</h3>
-        <button class="btn btn-primary btn-sm" @click.stop="showConnectForm = !showConnectForm">
+    <div class="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl p-5">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="m-0 text-base">数据库连接</h3>
+        <button
+          class="px-3 py-1.5 border-none rounded-lg text-xs cursor-pointer font-medium transition-all duration-150 bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          @click.stop="showConnectForm = !showConnectForm"
+        >
           {{ showConnectForm ? '取消' : '+ 新建连接' }}
         </button>
       </div>
 
-      <!-- Connect form -->
-      <div v-if="showConnectForm" class="connect-form" @click.stop>
-        <div class="form-row">
-          <div class="form-group">
-            <label>连接名称</label>
-            <input v-model="connectForm.name" class="input-field" placeholder="my_db" />
+      <div v-if="showConnectForm" class="flex flex-col gap-2.5 p-4 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg mb-3" @click.stop>
+        <div class="flex gap-2.5 flex-wrap items-end">
+          <div class="flex flex-col gap-1">
+            <label class="text-xs text-[var(--text-secondary)]">连接名称</label>
+            <input v-model="connectForm.name" class="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-[var(--text-primary)] text-sm outline-none transition-all duration-150 focus:border-[var(--accent-primary)]" placeholder="my_db" />
           </div>
-          <div class="form-group">
-            <label>数据库类型</label>
-            <select v-model="connectForm.db_type" class="input-field">
+          <div class="flex flex-col gap-1">
+            <label class="text-xs text-[var(--text-secondary)]">数据库类型</label>
+            <select v-model="connectForm.db_type" class="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-[var(--text-primary)] text-sm outline-none transition-all duration-150 focus:border-[var(--accent-primary)]">
               <option value="sqlite">SQLite</option>
               <option value="mysql">MySQL</option>
               <option value="postgres">PostgreSQL</option>
             </select>
           </div>
-          <div class="form-group narrow">
-            <label>最大连接数</label>
-            <input v-model.number="connectForm.max_connections" type="number" min="1" max="50" class="input-field" />
+          <div class="w-[100px] flex flex-col gap-1">
+            <label class="text-xs text-[var(--text-secondary)]">最大连接数</label>
+            <input v-model.number="connectForm.max_connections" type="number" min="1" max="50" class="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-[var(--text-primary)] text-sm outline-none transition-all duration-150 focus:border-[var(--accent-primary)]" />
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-group flex-1">
-            <label>DSN / 连接字符串</label>
-            <input v-model="connectForm.dsn" class="input-field" :placeholder="dsnPlaceholder" />
+        <div class="flex gap-2.5 flex-wrap items-end">
+          <div class="flex-1 min-w-[200px] flex flex-col gap-1">
+            <label class="text-xs text-[var(--text-secondary)]">DSN / 连接字符串</label>
+            <input v-model="connectForm.dsn" class="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-[var(--text-primary)] text-sm outline-none transition-all duration-150 focus:border-[var(--accent-primary)]" :placeholder="dsnPlaceholder" />
           </div>
-          <button class="btn btn-primary" :disabled="loading" @click.stop="doConnect">
+          <button
+            class="px-4 py-2 border-none rounded-lg text-sm cursor-pointer font-medium transition-all duration-150 bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="loading"
+            @click.stop="doConnect"
+          >
             {{ loading ? '连接中...' : '连接' }}
           </button>
         </div>
       </div>
 
-      <!-- Connection list -->
-      <div v-if="connections.length > 0" class="conn-list">
+      <div v-if="connections.length > 0" class="flex flex-col gap-1.5">
         <div
           v-for="conn in connections"
           :key="conn.name"
-          :class="['conn-item', { active: activeConn === conn.name }]"
+          class="flex items-center justify-between px-3.5 py-2.5 bg-[var(--bg-primary)] border border-[var(--bg-tertiary)] rounded-lg cursor-pointer transition-all duration-150 hover:border-[var(--accent-primary)]"
+          :class="{ 'border-[var(--accent-primary)] bg-[var(--bg-tertiary)]': activeConn === conn.name }"
           @click.stop="selectConnection(conn.name)"
         >
-          <div class="conn-info">
-            <span class="conn-name">{{ conn.name }}</span>
-            <span :class="['conn-type-badge', conn.db_type]">{{ conn.db_type }}</span>
-            <span :class="['conn-status', conn.connected ? 'online' : 'offline']">
+          <div class="flex items-center gap-2">
+            <span class="font-semibold text-sm text-[var(--text-primary)]">{{ conn.name }}</span>
+            <span
+              class="px-2 py-0.5 rounded-full text-xs font-medium"
+              :class="{
+                'bg-green-900/50 text-green-400': conn.db_type === 'sqlite',
+                'bg-purple-900/50 text-purple-400': conn.db_type === 'mysql',
+                'bg-blue-900/50 text-blue-400': conn.db_type === 'postgres'
+              }"
+            >
+              {{ conn.db_type }}
+            </span>
+            <span
+              class="text-xs px-1.5 py-0.5 rounded"
+              :class="conn.connected ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'"
+            >
               {{ conn.connected ? 'online' : 'offline' }}
             </span>
           </div>
-          <div class="conn-dsn">{{ conn.dsn_display }}</div>
-          <div class="conn-actions" @click.stop>
-            <button class="btn-icon" title="测试连接" @click="testConnection(conn.name)">&#9889;</button>
-            <button class="btn-icon danger" title="断开" @click="doDisconnect(conn.name)">&#10005;</button>
+          <div class="font-mono text-xs text-[var(--text-secondary)]/70 flex-1 mx-4 overflow-hidden text-ellipsis whitespace-nowrap">{{ conn.dsn_display }}</div>
+          <div class="flex gap-1" @click.stop>
+            <button class="bg-transparent border-none cursor-pointer text-sm p-1 rounded text-[var(--text-secondary)] transition-all duration-150 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]" title="测试连接" @click="testConnection(conn.name)">⚡</button>
+            <button class="bg-transparent border-none cursor-pointer text-sm p-1 rounded text-[var(--text-secondary)] transition-all duration-150 hover:bg-red-600 hover:text-white" title="断开" @click="doDisconnect(conn.name)">✕</button>
           </div>
         </div>
       </div>
-      <div v-else-if="!showConnectForm" class="empty-hint">暂无数据库连接，点击「新建连接」开始</div>
+      <div v-else-if="!showConnectForm" class="text-[var(--text-secondary)] text-sm py-4 text-center">暂无数据库连接，点击「新建连接」开始</div>
     </div>
 
-    <!-- Main workspace: only show when connected -->
     <template v-if="hasActiveConnection">
-      <div class="workspace">
-        <!-- Left: Table browser -->
-        <div class="table-browser">
-          <div class="section-header">
-            <h3>表 ({{ tables.length }})</h3>
-            <button class="btn-icon" title="刷新" @click="loadTables">&#8635;</button>
+      <div class="flex gap-4 min-h-[500px]">
+        <div class="w-[240px] flex-shrink-0 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl p-4 overflow-auto flex flex-col">
+          <div class="flex justify-between items-center mb-3">
+            <h3 class="m-0 text-sm">表 ({{ tables.length }})</h3>
+            <button class="bg-transparent border-none cursor-pointer text-sm p-1 rounded text-[var(--text-secondary)] transition-all duration-150 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]" title="刷新" @click="loadTables">↻</button>
           </div>
-          <div v-if="tables.length === 0" class="empty-hint">无表</div>
+          <div v-if="tables.length === 0" class="text-[var(--text-secondary)] text-sm">无表</div>
           <div
             v-for="t in tables"
             :key="t"
-            :class="['table-item', { active: selectedTable === t }]"
+            class="flex items-center justify-between px-2.5 py-1.5 rounded-md cursor-pointer transition-all duration-150 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+            :class="{ 'bg-[var(--bg-elevated)] text-[var(--accent-primary)]': selectedTable === t }"
             @click="describeTable(t)"
           >
-            <span class="table-name">{{ t }}</span>
-            <button class="btn-icon small" title="预览数据" @click.stop="previewTable(t)">&#9654;</button>
+            <span class="font-mono text-sm">{{ t }}</span>
+            <button class="bg-transparent border-none cursor-pointer text-xs p-0.5 rounded text-[var(--text-secondary)] transition-all duration-150 hover:text-[var(--accent-primary)]" title="预览数据" @click.stop="previewTable(t)">▶</button>
           </div>
 
-          <!-- Table schema -->
-          <div v-if="tableSchema && selectedTable" class="schema-section">
-            <h4>{{ selectedTable }} 结构</h4>
-            <div class="schema-table-wrap">
-              <table class="data-table compact">
+          <div v-if="tableSchema && selectedTable" class="mt-4 border-t border-[var(--border-color)] pt-3">
+            <h4 class="m-0 mb-2 text-sm text-[var(--text-secondary)]">{{ selectedTable }} 结构</h4>
+            <div class="overflow-auto max-h-[200px]">
+              <table class="w-full border-collapse text-xs">
                 <thead>
                   <tr>
-                    <th v-for="col in tableSchema.columns" :key="col">{{ col }}</th>
+                    <th v-for="col in tableSchema.columns" :key="col" class="px-2 py-1 text-left font-semibold text-[var(--text-primary)] border-b-2 border-[var(--border-color)] whitespace-nowrap">{{ col }}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(row, ri) in tableSchema.rows" :key="ri">
-                    <td v-for="(cell, ci) in row" :key="ci">{{ formatCellValue(cell) }}</td>
+                  <tr v-for="(row, ri) in tableSchema.rows" :key="ri" class="hover:bg-[var(--bg-tertiary)]">
+                    <td v-for="(cell, ci) in row" :key="ci" class="px-2 py-1 border-b border-[var(--bg-tertiary)] text-[var(--text-primary)] max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap">{{ formatCellValue(cell) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -380,19 +383,21 @@ function clearMessages() {
           </div>
         </div>
 
-        <!-- Right: SQL editor + results -->
-        <div class="query-workspace">
-          <!-- SQL Editor -->
-          <div class="sql-editor">
-            <div class="editor-header">
-              <h3>SQL 查询</h3>
-              <div class="editor-actions">
-                <button class="btn btn-primary btn-sm" :disabled="queryLoading" @click="doQuery">
+        <div class="flex-1 flex flex-col gap-3 min-w-0">
+          <div class="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl overflow-hidden">
+            <div class="flex justify-between items-center px-4 py-2.5 border-b border-[var(--border-color)]">
+              <h3 class="m-0 text-sm">SQL 查询</h3>
+              <div class="flex gap-2">
+                <button
+                  class="px-3 py-1.5 border-none rounded-lg text-xs cursor-pointer font-medium transition-all duration-150 bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="queryLoading"
+                  @click="doQuery"
+                >
                   {{ queryLoading ? '执行中...' : '执行 (Ctrl+Enter)' }}
                 </button>
                 <button
                   v-if="queryResult && queryResult.row_count > 0"
-                  class="btn btn-accent btn-sm"
+                  class="px-3 py-1.5 border-none rounded-lg text-xs cursor-pointer font-medium transition-all duration-150 bg-purple-600 text-white hover:bg-purple-500"
                   @click="openImportPanel"
                 >
                   导入向量库
@@ -401,69 +406,71 @@ function clearMessages() {
             </div>
             <textarea
               v-model="sqlText"
-              class="sql-input"
+              class="w-full bg-[var(--bg-primary)] border-none px-4 py-3 text-[var(--text-primary)] text-sm font-mono resize-y outline-none leading-6"
               rows="5"
               placeholder="输入 SQL 查询语句..."
               @keydown.ctrl.enter="doQuery"
             ></textarea>
           </div>
 
-          <!-- Import panel -->
-          <div v-if="showImportPanel" class="import-panel">
-            <div class="section-header">
-              <h3>导入到向量库</h3>
-              <button class="btn-icon" @click="showImportPanel = false">&#10005;</button>
+          <div v-if="showImportPanel" class="bg-[var(--bg-secondary)] border border-yellow-600 rounded-xl p-5">
+            <div class="flex justify-between items-center mb-2">
+              <h3 class="m-0 text-sm">导入到向量库</h3>
+              <button class="bg-transparent border-none cursor-pointer text-sm p-1 rounded text-[var(--text-secondary)] transition-all duration-150 hover:bg-[var(--bg-tertiary)]" @click="showImportPanel = false">✕</button>
             </div>
-            <p class="hint-text">将查询结果中的数据导入到 SkyMemory 向量库。请指定包含向量数据的列。</p>
-            <div class="form-row">
-              <div class="form-group">
-                <label>向量列 <span class="required">*</span></label>
-                <select v-model="importForm.vector_column" class="input-field">
+            <p class="text-[var(--text-secondary)] text-sm m-0 mb-3">将查询结果中的数据导入到 SkyMemory 向量库。请指定包含向量数据的列。</p>
+            <div class="flex gap-2.5 flex-wrap items-end">
+              <div class="flex flex-col gap-1">
+                <label class="text-xs text-[var(--text-secondary)]">向量列 <span class="text-red-400">*</span></label>
+                <select v-model="importForm.vector_column" class="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-[var(--text-primary)] text-sm outline-none transition-all duration-150 focus:border-[var(--accent-primary)]">
                   <option v-for="col in (queryResult?.columns ?? [])" :key="col" :value="col">{{ col }}</option>
                 </select>
               </div>
-              <div class="form-group flex-1">
-                <label>元数据列 <span class="optional">(逗号分隔，留空=全部)</span></label>
-                <input v-model="importForm.metadata_columns" class="input-field" placeholder="col1, col2, col3" />
+              <div class="flex-1 min-w-[200px] flex flex-col gap-1">
+                <label class="text-xs text-[var(--text-secondary)]">元数据列 <span class="text-[var(--text-secondary)]/70 text-xs">(逗号分隔，留空=全部)</span></label>
+                <input v-model="importForm.metadata_columns" class="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-[var(--text-primary)] text-sm outline-none transition-all duration-150 focus:border-[var(--accent-primary)]" placeholder="col1, col2, col3" />
               </div>
-              <div class="form-group">
-                <label>记忆类型</label>
-                <select v-model="importForm.memory_type" class="input-field">
+              <div class="flex flex-col gap-1">
+                <label class="text-xs text-[var(--text-secondary)]">记忆类型</label>
+                <select v-model="importForm.memory_type" class="bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-[var(--text-primary)] text-sm outline-none transition-all duration-150 focus:border-[var(--accent-primary)]">
                   <option value="semantic">语义记忆</option>
                   <option value="episodic">情景记忆</option>
                 </select>
               </div>
             </div>
-            <div class="form-row">
-              <button class="btn btn-primary" :disabled="loading" @click="doImport">
+            <div class="flex gap-2.5 mt-3">
+              <button
+                class="px-4 py-2 border-none rounded-lg text-sm cursor-pointer font-medium transition-all duration-150 bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                :disabled="loading"
+                @click="doImport"
+              >
                 {{ loading ? '导入中...' : `确认导入 (${queryResult?.row_count ?? 0} 条)` }}
               </button>
             </div>
           </div>
 
-          <!-- Query results -->
-          <div v-if="queryResult" class="results-section">
-            <div class="results-header">
+          <div v-if="queryResult" class="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl overflow-hidden flex-1 flex flex-col">
+            <div class="flex justify-between items-center px-4 py-2 border-b border-[var(--border-color)] text-xs text-[var(--text-secondary)]">
               <span>{{ queryResult.row_count }} 行 / {{ queryResult.columns.length }} 列</span>
-              <span class="elapsed">{{ queryResult.elapsed_ms }}ms</span>
+              <span class="text-green-400 font-mono">{{ queryResult.elapsed_ms }}ms</span>
             </div>
-            <div class="results-table-wrap">
-              <table class="data-table">
+            <div class="overflow-auto flex-1">
+              <table class="w-full border-collapse text-sm">
                 <thead>
                   <tr>
-                    <th class="row-num">#</th>
-                    <th v-for="(col, i) in queryResult.columns" :key="i">
-                      <div class="col-header">
+                    <th class="w-10 text-right text-[var(--text-secondary)] font-mono text-xs px-3 py-2 border-b-2 border-[var(--border-color)] bg-[var(--bg-secondary)] sticky top-0">#</th>
+                    <th v-for="(col, i) in queryResult.columns" :key="i" class="px-3 py-2 text-left border-b-2 border-[var(--border-color)] bg-[var(--bg-secondary)] sticky top-0 font-semibold text-[var(--text-primary)] whitespace-nowrap">
+                      <div class="flex flex-col gap-0.5">
                         <span>{{ col }}</span>
-                        <span class="col-type">{{ queryResult.column_types[i] }}</span>
+                        <span class="text-[var(--text-secondary)]/70 text-[10px] font-normal font-mono">{{ queryResult.column_types[i] }}</span>
                       </div>
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(row, ri) in queryResult.rows" :key="ri">
-                    <td class="row-num">{{ ri + 1 }}</td>
-                    <td v-for="(cell, ci) in row" :key="ci" :title="formatCellValue(cell)">
+                  <tr v-for="(row, ri) in queryResult.rows" :key="ri" class="hover:bg-[var(--bg-tertiary)]">
+                    <td class="text-right text-[var(--text-secondary)] font-mono text-xs px-3 py-1.5 border-b border-[var(--bg-tertiary)] w-10">{{ ri + 1 }}</td>
+                    <td v-for="(cell, ci) in row" :key="ci" class="px-3 py-1.5 border-b border-[var(--bg-tertiary)] text-[var(--text-primary)] max-w-[300px] overflow-hidden text-ellipsis whitespace-nowrap" :title="formatCellValue(cell)">
                       {{ formatCellValue(cell) }}
                     </td>
                   </tr>
@@ -471,510 +478,9 @@ function clearMessages() {
               </table>
             </div>
           </div>
-          <div v-else-if="!queryLoading" class="empty-hint center">
-            选择表或输入 SQL 查询
-          </div>
+          <div v-else-if="!queryLoading" class="text-[var(--text-secondary)] text-sm text-center py-16">选择表或输入 SQL 查询</div>
         </div>
       </div>
     </template>
   </div>
 </template>
-
-<style scoped>
-.db-view {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.alert {
-  padding: 10px 16px;
-  border-radius: 8px;
-  font-size: 13px;
-}
-
-.alert.error {
-  background: #3d1414;
-  border: 1px solid #da3633;
-  color: #f85149;
-}
-
-.alert.success {
-  background: #1c3a2a;
-  border: 1px solid #238636;
-  color: #3fb950;
-}
-
-/* Section cards */
-.section-card {
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 12px;
-  padding: 16px 20px;
-}
-
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.section-header h3 {
-  margin: 0;
-  font-size: 15px;
-}
-
-/* Connect form */
-.connect-form {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-  background: #0d1117;
-  border: 1px solid #30363d;
-  border-radius: 10px;
-  margin-bottom: 12px;
-}
-
-.form-row {
-  display: flex;
-  gap: 10px;
-  align-items: flex-end;
-  flex-wrap: wrap;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.form-group.flex-1 {
-  flex: 1;
-  min-width: 200px;
-}
-
-.form-group.narrow {
-  width: 100px;
-}
-
-.form-group label {
-  font-size: 12px;
-  color: #8b949e;
-}
-
-.required {
-  color: #f85149;
-}
-
-.optional {
-  color: #6e7681;
-  font-size: 11px;
-}
-
-.input-field {
-  background: #0d1117;
-  border: 1px solid #30363d;
-  border-radius: 8px;
-  padding: 8px 12px;
-  color: #e1e4e8;
-  font-size: 13px;
-  outline: none;
-  transition: border-color 0.15s;
-}
-
-.input-field:focus {
-  border-color: #58a6ff;
-}
-
-/* Connection list */
-.conn-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.conn-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  background: #0d1117;
-  border: 1px solid #21262d;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.conn-item:hover {
-  border-color: #58a6ff;
-}
-
-.conn-item.active {
-  border-color: #58a6ff;
-  background: #1c2333;
-}
-
-.conn-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.conn-name {
-  font-weight: 600;
-  font-size: 14px;
-  color: #e1e4e8;
-}
-
-.conn-type-badge {
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.conn-type-badge.sqlite {
-  background: #1c3a2a;
-  color: #3fb950;
-}
-
-.conn-type-badge.mysql {
-  background: #2d1f5e;
-  color: #bc8cff;
-}
-
-.conn-type-badge.postgres {
-  background: #1a2742;
-  color: #58a6ff;
-}
-
-.conn-status {
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 8px;
-}
-
-.conn-status.online {
-  background: #1c3a2a;
-  color: #3fb950;
-}
-
-.conn-status.offline {
-  background: #3d1414;
-  color: #f85149;
-}
-
-.conn-dsn {
-  font-family: monospace;
-  font-size: 11px;
-  color: #6e7681;
-  flex: 1;
-  margin: 0 16px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.conn-actions {
-  display: flex;
-  gap: 4px;
-}
-
-/* Workspace layout */
-.workspace {
-  display: flex;
-  gap: 16px;
-  min-height: 500px;
-}
-
-/* Table browser */
-.table-browser {
-  width: 240px;
-  flex-shrink: 0;
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 12px;
-  padding: 16px;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-}
-
-.table-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s;
-  font-size: 13px;
-  color: #8b949e;
-}
-
-.table-item:hover {
-  background: #1c2333;
-  color: #e1e4e8;
-}
-
-.table-item.active {
-  background: #1f2a3d;
-  color: #58a6ff;
-}
-
-.table-name {
-  font-family: monospace;
-  font-size: 13px;
-}
-
-.schema-section {
-  margin-top: 16px;
-  border-top: 1px solid #30363d;
-  padding-top: 12px;
-}
-
-.schema-section h4 {
-  margin: 0 0 8px 0;
-  font-size: 13px;
-  color: #8b949e;
-}
-
-.schema-table-wrap {
-  overflow: auto;
-  max-height: 200px;
-}
-
-/* Query workspace */
-.query-workspace {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
-}
-
-.sql-editor {
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.editor-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 16px;
-  border-bottom: 1px solid #30363d;
-}
-
-.editor-header h3 {
-  margin: 0;
-  font-size: 14px;
-}
-
-.editor-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.sql-input {
-  width: 100%;
-  background: #0d1117;
-  border: none;
-  padding: 12px 16px;
-  color: #e1e4e8;
-  font-size: 14px;
-  font-family: 'Cascadia Code', 'Fira Code', monospace;
-  resize: vertical;
-  outline: none;
-  line-height: 1.6;
-}
-
-/* Import panel */
-.import-panel {
-  background: #161b22;
-  border: 1px solid #d29922;
-  border-radius: 12px;
-  padding: 16px 20px;
-}
-
-.import-panel .section-header {
-  margin-bottom: 8px;
-}
-
-.hint-text {
-  color: #8b949e;
-  font-size: 13px;
-  margin: 0 0 12px 0;
-}
-
-/* Results */
-.results-section {
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 12px;
-  overflow: hidden;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.results-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 16px;
-  border-bottom: 1px solid #30363d;
-  font-size: 12px;
-  color: #8b949e;
-}
-
-.elapsed {
-  color: #3fb950;
-  font-family: monospace;
-}
-
-.results-table-wrap {
-  overflow: auto;
-  flex: 1;
-}
-
-/* Data table */
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.data-table.compact {
-  font-size: 11px;
-}
-
-.data-table th {
-  position: sticky;
-  top: 0;
-  background: #161b22;
-  padding: 8px 12px;
-  text-align: left;
-  border-bottom: 2px solid #30363d;
-  font-weight: 600;
-  font-size: 12px;
-  color: #e1e4e8;
-  white-space: nowrap;
-}
-
-.data-table td {
-  padding: 6px 12px;
-  border-bottom: 1px solid #21262d;
-  color: #c9d1d9;
-  max-width: 300px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.data-table tbody tr:hover {
-  background: #1c2333;
-}
-
-.col-header {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.col-type {
-  font-size: 10px;
-  color: #6e7681;
-  font-weight: 400;
-  font-family: monospace;
-}
-
-.row-num {
-  color: #484f58;
-  font-size: 11px;
-  width: 40px;
-  text-align: right;
-  font-family: monospace;
-}
-
-/* Buttons */
-.btn {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-sm {
-  padding: 5px 12px;
-  font-size: 12px;
-}
-
-.btn-primary {
-  background: #238636;
-  color: #fff;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: #2ea043;
-}
-
-.btn-accent {
-  background: #8957e5;
-  color: #fff;
-}
-
-.btn-accent:hover:not(:disabled) {
-  background: #a371f7;
-}
-
-.btn-icon {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 14px;
-  padding: 4px 6px;
-  border-radius: 4px;
-  color: #8b949e;
-  transition: all 0.15s;
-}
-
-.btn-icon:hover {
-  background: #21262d;
-  color: #e1e4e8;
-}
-
-.btn-icon.danger:hover {
-  background: #da3633;
-  color: #fff;
-}
-
-.btn-icon.small {
-  font-size: 12px;
-  padding: 2px 4px;
-}
-
-.empty-hint {
-  color: #6e7681;
-  font-size: 13px;
-  padding: 16px 0;
-}
-
-.empty-hint.center {
-  text-align: center;
-  padding: 60px 0;
-}
-</style>

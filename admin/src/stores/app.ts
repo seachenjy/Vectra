@@ -10,6 +10,45 @@ export const useAppStore = defineStore('app', () => {
   const loading = ref(false)
   const error = ref<string | null>(null)
   const sidebarCollapsed = ref(false)
+  const theme = ref<'light' | 'dark' | 'system'>('system')
+
+  function getSystemTheme(): 'light' | 'dark' {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  }
+
+  function getEffectiveTheme(): 'light' | 'dark' {
+    return theme.value === 'system' ? getSystemTheme() : theme.value
+  }
+
+  function setTheme(newTheme: 'light' | 'dark' | 'system') {
+    theme.value = newTheme
+    localStorage.setItem('admin-theme', newTheme)
+    applyTheme()
+  }
+
+  function applyTheme() {
+    const effective = getEffectiveTheme()
+    document.documentElement.setAttribute('data-theme', effective)
+  }
+
+  function initTheme() {
+    const saved = localStorage.getItem('admin-theme') as 'light' | 'dark' | 'system' | null
+    if (saved) {
+      theme.value = saved
+    }
+    applyTheme()
+
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      if (theme.value === 'system') {
+        applyTheme()
+      }
+    })
+  }
+
+  function toggleTheme() {
+    const current = getEffectiveTheme()
+    setTheme(current === 'dark' ? 'light' : 'dark')
+  }
 
   async function fetchInfo() {
     loading.value = true
@@ -35,5 +74,5 @@ export const useAppStore = defineStore('app', () => {
     sidebarCollapsed.value = !sidebarCollapsed.value
   }
 
-  return { info, metrics, loading, error, sidebarCollapsed, fetchInfo, fetchMetrics, toggleSidebar }
+  return { info, metrics, loading, error, sidebarCollapsed, theme, fetchInfo, fetchMetrics, toggleSidebar, setTheme, initTheme, toggleTheme, getEffectiveTheme }
 })

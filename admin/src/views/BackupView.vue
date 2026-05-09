@@ -114,215 +114,79 @@ function formatSnapshotId(id: string): string {
 </script>
 
 <template>
-  <div class="backup-view">
-    <div v-if="error" class="alert error">{{ error }}</div>
-    <div v-if="success" class="alert success">{{ success }}</div>
+  <div class="flex flex-col gap-5">
+    <div v-if="error" class="px-4 py-2.5 bg-red-900/50 border border-red-600 rounded-lg text-red-400 text-sm">{{ error }}</div>
+    <div v-if="success" class="px-4 py-2.5 bg-green-900/50 border border-green-600 rounded-lg text-green-400 text-sm">{{ success }}</div>
 
-    <div class="backup-grid">
-      <div class="backup-card">
-        <h3>创建备份</h3>
-        <p class="card-desc">将当前所有记忆节点保存为快照</p>
-        <button class="btn btn-primary" :disabled="loading" @click="createBackup">
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4">
+      <div class="bg-bg-secondary border border-border-color rounded-xl p-5">
+        <h3 class="m-0 mb-1.5 text-base">创建备份</h3>
+        <p class="text-text-secondary text-sm m-0 mb-3">将当前所有记忆节点保存为快照</p>
+        <button
+          class="px-4 py-2 border-none rounded-lg text-sm cursor-pointer font-medium transition-all duration-150 bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          :disabled="loading"
+          @click="createBackup"
+        >
           {{ loading ? '处理中...' : '创建快照' }}
         </button>
       </div>
 
-      <div class="backup-card">
-        <h3>导出数据</h3>
-        <p class="card-desc">将所有记忆导出为 SkyArchive JSON 文件</p>
-        <button class="btn btn-secondary" :disabled="loading" @click="doExport">
+      <div class="bg-bg-secondary border border-border-color rounded-xl p-5">
+        <h3 class="m-0 mb-1.5 text-base">导出数据</h3>
+        <p class="text-text-secondary text-sm m-0 mb-3">将所有记忆导出为 SkyArchive JSON 文件</p>
+        <button
+          class="px-4 py-2 border border-border-color rounded-lg text-sm cursor-pointer font-medium transition-all duration-150 bg-bg-tertiary text-text-primary hover:bg-bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+          :disabled="loading"
+          @click="doExport"
+        >
           下载导出文件
         </button>
       </div>
 
-      <div class="backup-card">
-        <h3>导入数据</h3>
-        <p class="card-desc">从文件导入记忆节点</p>
-        <div class="import-form">
-          <input v-model="importPath" placeholder="文件路径" class="input-field full" />
-          <select v-model="importFormat" class="input-field">
+      <div class="bg-bg-secondary border border-border-color rounded-xl p-5">
+        <h3 class="m-0 mb-1.5 text-base">导入数据</h3>
+        <p class="text-text-secondary text-sm m-0 mb-3">从文件导入记忆节点</p>
+        <div class="flex flex-col gap-2">
+          <input
+            v-model="importPath"
+            placeholder="文件路径"
+            class="w-full bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-sm outline-none transition-all duration-150 focus:border-accent-primary"
+          />
+          <select
+            v-model="importFormat"
+            class="bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-sm outline-none transition-all duration-150 focus:border-accent-primary"
+          >
             <option value="jsonl">JSONL</option>
             <option value="csv">CSV</option>
             <option value="archive">SkyArchive</option>
           </select>
-          <button class="btn btn-primary" :disabled="loading" @click="doImport">导入</button>
+          <button
+            class="px-4 py-2 border-none rounded-lg text-sm cursor-pointer font-medium transition-all duration-150 bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="loading"
+            @click="doImport"
+          >
+            导入
+          </button>
         </div>
       </div>
     </div>
 
-    <div class="snapshots-section">
-      <h3>历史备份 ({{ backups.length }})</h3>
-      <div v-if="backups.length === 0" class="empty-hint">暂无备份</div>
-      <div v-for="snap in backups" :key="snap" class="snapshot-row">
-        <div class="snapshot-info">
-          <span class="snapshot-id">{{ snap }}</span>
-          <span class="snapshot-time">{{ formatSnapshotId(snap) }}</span>
+    <div class="bg-bg-secondary border border-border-color rounded-xl p-5">
+      <h3 class="m-0 mb-3 text-base">历史备份 ({{ backups.length }})</h3>
+      <div v-if="backups.length === 0" class="text-text-secondary text-sm text-center py-6">暂无备份</div>
+      <div v-for="snap in backups" :key="snap" class="flex justify-between items-center py-2.5 border-b border-bg-tertiary">
+        <div class="flex flex-col gap-0.5">
+          <span class="font-mono text-sm text-accent-primary">{{ snap }}</span>
+          <span class="text-xs text-text-secondary">{{ formatSnapshotId(snap) }}</span>
         </div>
-        <button class="btn btn-secondary btn-sm" :disabled="loading" @click="restoreBackup(snap)">
+        <button
+          class="px-2.5 py-1 border border-border-color rounded-lg text-xs cursor-pointer font-medium transition-all duration-150 bg-bg-tertiary text-text-primary hover:bg-bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+          :disabled="loading"
+          @click="restoreBackup(snap)"
+        >
           恢复
         </button>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.backup-view {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.alert {
-  padding: 10px 16px;
-  border-radius: 8px;
-  font-size: 13px;
-}
-
-.alert.error {
-  background: #3d1414;
-  border: 1px solid #da3633;
-  color: #f85149;
-}
-
-.alert.success {
-  background: #1c3a2a;
-  border: 1px solid #238636;
-  color: #3fb950;
-}
-
-.backup-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 16px;
-}
-
-.backup-card {
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 12px;
-  padding: 20px;
-}
-
-.backup-card h3 {
-  margin: 0 0 6px 0;
-  font-size: 15px;
-}
-
-.card-desc {
-  color: #8b949e;
-  font-size: 13px;
-  margin: 0 0 12px 0;
-}
-
-.import-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.input-field {
-  background: #0d1117;
-  border: 1px solid #30363d;
-  border-radius: 8px;
-  padding: 8px 12px;
-  color: #e1e4e8;
-  font-size: 13px;
-  outline: none;
-}
-
-.input-field:focus {
-  border-color: #58a6ff;
-}
-
-.input-field.full {
-  width: 100%;
-}
-
-.btn {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: all 0.15s;
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-primary {
-  background: #238636;
-  color: #fff;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: #2ea043;
-}
-
-.btn-secondary {
-  background: #21262d;
-  color: #e1e4e8;
-  border: 1px solid #30363d;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: #30363d;
-}
-
-.btn-sm {
-  padding: 4px 10px;
-  font-size: 12px;
-}
-
-.snapshots-section {
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 12px;
-  padding: 20px;
-}
-
-.snapshots-section h3 {
-  margin: 0 0 12px 0;
-  font-size: 15px;
-}
-
-.snapshot-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 0;
-  border-bottom: 1px solid #21262d;
-}
-
-.snapshot-row:last-child {
-  border-bottom: none;
-}
-
-.snapshot-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.snapshot-id {
-  font-family: monospace;
-  font-size: 13px;
-  color: #58a6ff;
-}
-
-.snapshot-time {
-  font-size: 12px;
-  color: #6e7681;
-}
-
-.empty-hint {
-  color: #6e7681;
-  text-align: center;
-  padding: 24px 0;
-  font-size: 13px;
-}
-</style>

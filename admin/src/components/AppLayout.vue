@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useRouter, useRoute } from 'vue-router'
 
@@ -18,203 +19,90 @@ const navItems = [
 function isActive(path: string) {
   return route.path === path
 }
+
+const themeIcon = computed(() => {
+  const effective = store.getEffectiveTheme()
+  return effective === 'dark' ? '☀️' : '🌙'
+})
+
+const themeLabel = computed(() => {
+  if (store.theme === 'system') return '跟随系统'
+  return store.getEffectiveTheme() === 'dark' ? '暗色' : '亮色'
+})
 </script>
 
 <template>
-  <div class="layout">
-    <aside :class="['sidebar', { collapsed: store.sidebarCollapsed }]">
-      <div class="sidebar-header">
-        <span v-if="!store.sidebarCollapsed" class="logo">SkyMemory</span>
-        <span v-else class="logo-mini">SM</span>
+  <div class="flex min-h-screen bg-bg-primary text-text-primary font-sans">
+    <aside
+      class="w-[220px] bg-bg-secondary border-r border-border-color flex flex-col transition-all duration-200 flex-shrink-0"
+      :class="{ 'w-[60px]': store.sidebarCollapsed }"
+    >
+      <div class="p-5 border-b border-border-color">
+        <span
+          v-if="!store.sidebarCollapsed"
+          class="text-lg font-bold bg-gradient-to-r from-accent-primary to-accent-secondary bg-clip-text text-transparent"
+        >
+          SkyMemory
+        </span>
+        <span v-else class="text-base font-bold text-accent-primary">SM</span>
       </div>
-      <nav class="nav">
+      <nav class="flex-1 p-2 flex flex-col gap-1">
         <button
           v-for="item in navItems"
           :key="item.path"
-          :class="['nav-item', { active: isActive(item.path) }]"
+          class="flex items-center gap-2.5 p-2.5 border-none bg-transparent text-text-secondary rounded-lg cursor-pointer text-sm transition-all duration-150 hover:bg-bg-tertiary hover:text-text-primary"
+          :class="{ 'bg-bg-elevated text-accent-primary': isActive(item.path) }"
           @click="router.push(item.path)"
         >
-          <span class="nav-icon">{{ item.icon }}</span>
-          <span v-if="!store.sidebarCollapsed" class="nav-label">{{ item.label }}</span>
+          <span class="text-lg flex-shrink-0">{{ item.icon }}</span>
+          <span v-if="!store.sidebarCollapsed">{{ item.label }}</span>
         </button>
       </nav>
-      <button class="toggle-btn" @click="store.toggleSidebar">
+      <button
+        class="m-2 p-2 border border-bg-secondary bg-bg-secondary text-text-secondary rounded-md cursor-pointer text-sm hover:bg-bg-tertiary hover:text-text-primary"
+        @click="store.toggleSidebar"
+      >
         {{ store.sidebarCollapsed ? '→' : '←' }}
       </button>
     </aside>
-    <main class="main">
-      <header class="topbar">
-        <h1 class="page-title">{{ route.name }}</h1>
-        <div class="status-bar">
-          <span v-if="store.info" class="status-chip">
+    <main class="flex-1 flex flex-col min-w-0">
+      <header class="flex items-center justify-between p-4 border-b border-border-color bg-bg-secondary">
+        <h1 class="text-xl font-semibold m-0 capitalize">{{ route.name }}</h1>
+        <div class="flex items-center gap-2.5">
+          <button
+            class="flex items-center justify-center w-8 h-8 border border-border-color bg-bg-tertiary rounded-md cursor-pointer transition-all duration-150 hover:bg-bg-elevated"
+            @click="store.toggleTheme"
+            :title="themeLabel"
+          >
+            <span class="text-base">{{ themeIcon }}</span>
+          </button>
+          <span
+            v-if="store.info"
+            class="px-2.5 py-1 bg-bg-tertiary border border-border-color rounded-full text-xs text-text-secondary"
+          >
             节点: {{ store.info.node_count }}
           </span>
-          <span v-if="store.info" class="status-chip">
+          <span
+            v-if="store.info"
+            class="px-2.5 py-1 bg-bg-tertiary border border-border-color rounded-full text-xs text-text-secondary"
+          >
             边: {{ store.info.edge_count }}
           </span>
-          <span v-if="store.info" class="status-chip">
+          <span
+            v-if="store.info"
+            class="px-2.5 py-1 bg-bg-tertiary border border-border-color rounded-full text-xs text-text-secondary"
+          >
             维度: {{ store.info.dimension }}
           </span>
-          <span v-if="store.loading" class="loading-dot"></span>
+          <span
+            v-if="store.loading"
+            class="w-2 h-2 bg-accent-primary rounded-full animate-pulse"
+          ></span>
         </div>
       </header>
-      <section class="content">
+      <section class="flex-1 p-6 overflow-auto">
         <slot />
       </section>
     </main>
   </div>
 </template>
-
-<style scoped>
-.layout {
-  display: flex;
-  min-height: 100vh;
-  background: #0f1117;
-  color: #e1e4e8;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-
-.sidebar {
-  width: 220px;
-  background: #161b22;
-  border-right: 1px solid #30363d;
-  display: flex;
-  flex-direction: column;
-  transition: width 0.2s ease;
-  flex-shrink: 0;
-}
-
-.sidebar.collapsed {
-  width: 60px;
-}
-
-.sidebar-header {
-  padding: 20px 16px;
-  border-bottom: 1px solid #30363d;
-}
-
-.logo {
-  font-size: 18px;
-  font-weight: 700;
-  background: linear-gradient(135deg, #58a6ff, #bc8cff);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.logo-mini {
-  font-size: 16px;
-  font-weight: 700;
-  color: #58a6ff;
-}
-
-.nav {
-  flex: 1;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border: none;
-  background: transparent;
-  color: #8b949e;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: all 0.15s ease;
-  text-align: left;
-}
-
-.nav-item:hover {
-  background: #1c2333;
-  color: #e1e4e8;
-}
-
-.nav-item.active {
-  background: #1f2a3d;
-  color: #58a6ff;
-}
-
-.nav-icon {
-  font-size: 18px;
-  flex-shrink: 0;
-}
-
-.toggle-btn {
-  margin: 8px;
-  padding: 8px;
-  border: 1px solid #30363d;
-  background: #161b22;
-  color: #8b949e;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-.toggle-btn:hover {
-  background: #1c2333;
-  color: #e1e4e8;
-}
-
-.main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 24px;
-  border-bottom: 1px solid #30363d;
-  background: #161b22;
-}
-
-.page-title {
-  font-size: 20px;
-  font-weight: 600;
-  margin: 0;
-  text-transform: capitalize;
-}
-
-.status-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.status-chip {
-  padding: 4px 10px;
-  background: #1c2333;
-  border: 1px solid #30363d;
-  border-radius: 12px;
-  font-size: 12px;
-  color: #8b949e;
-}
-
-.loading-dot {
-  width: 8px;
-  height: 8px;
-  background: #58a6ff;
-  border-radius: 50%;
-  animation: pulse 1s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
-}
-
-.content {
-  flex: 1;
-  padding: 24px;
-  overflow: auto;
-}
-</style>

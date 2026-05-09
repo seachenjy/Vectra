@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useApi } from '../composables/useApi'
 
 const api = useApi()
@@ -109,48 +109,56 @@ function getActivationOpacity(nodeId: number): number {
   return 0.3 + act.activation * 0.7
 }
 
-function formatTimestamp(ms: number): string {
-  return new Date(ms).toLocaleString('zh-CN')
-}
 </script>
 
 <template>
-  <div class="graph-view">
-    <div class="toolbar">
-      <div class="toolbar-row">
+  <div class="flex flex-col gap-4">
+    <div class="bg-bg-secondary border border-border-color rounded-xl p-4">
+      <div class="flex gap-2 flex-wrap items-center">
         <input
           v-model.number="startId"
           type="number"
           placeholder="起始节点 ID"
-          class="input-field"
+          class="bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-sm outline-none transition-all duration-150 focus:border-accent-primary"
         />
         <input
           v-model.number="traverseDepth"
           type="number"
           min="1"
           max="5"
-          class="input-field narrow"
           placeholder="深度"
+          class="w-20 bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-sm outline-none transition-all duration-150 focus:border-accent-primary"
         />
-        <select v-model="edgeTypeFilter" class="input-field">
+        <select
+          v-model="edgeTypeFilter"
+          class="bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-sm outline-none transition-all duration-150 focus:border-accent-primary"
+        >
           <option v-for="et in edgeTypes" :key="et.value" :value="et.value">
             {{ et.label }}
           </option>
         </select>
-        <button class="btn btn-primary" :disabled="loading" @click="doTraverse">
+        <button
+          class="px-4 py-2 border-none rounded-lg text-sm cursor-pointer font-medium transition-all duration-150 bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          :disabled="loading"
+          @click="doTraverse"
+        >
           遍历
         </button>
-        <button class="btn btn-secondary" :disabled="loading" @click="doActivate">
+        <button
+          class="px-4 py-2 border border-border-color rounded-lg text-sm cursor-pointer font-medium transition-all duration-150 bg-bg-tertiary text-text-primary hover:bg-bg-elevated disabled:opacity-50 disabled:cursor-not-allowed"
+          :disabled="loading"
+          @click="doActivate"
+        >
           扩散激活
         </button>
       </div>
     </div>
 
-    <div v-if="error" class="alert error">{{ error }}</div>
+    <div v-if="error" class="px-4 py-2.5 bg-red-900/50 border border-red-600 rounded-lg text-red-400 text-sm">{{ error }}</div>
 
-    <div class="graph-container">
-      <div class="canvas-wrapper">
-        <svg width="100%" height="500" class="graph-svg">
+    <div class="flex gap-4 min-h-[500px]">
+      <div class="flex-1 bg-bg-primary border border-border-color rounded-xl overflow-hidden">
+        <svg width="100%" height="500" class="block">
           <line
             v-for="(edge, i) in edges"
             :key="'e' + i"
@@ -186,223 +194,47 @@ function formatTimestamp(ms: number): string {
         </svg>
       </div>
 
-      <div v-if="nodes.length > 0" class="legend-panel">
-        <h3>图例</h3>
-        <div class="legend-item">
-          <span class="legend-circle" style="background:#58a6ff"></span>
+      <div v-if="nodes.length > 0" class="w-[220px] flex-shrink-0 bg-bg-secondary border border-border-color rounded-xl p-4">
+        <h3 class="m-0 mb-2.5 text-sm text-text-primary">图例</h3>
+        <div class="flex items-center gap-2 py-1 text-xs text-text-secondary">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-[#58a6ff]"></span>
           <span>SimilarTo</span>
         </div>
-        <div class="legend-item">
-          <span class="legend-circle" style="background:#bc8cff"></span>
+        <div class="flex items-center gap-2 py-1 text-xs text-text-secondary">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-[#bc8cff]"></span>
           <span>DerivedFrom</span>
         </div>
-        <div class="legend-item">
-          <span class="legend-circle" style="background:#3fb950"></span>
+        <div class="flex items-center gap-2 py-1 text-xs text-text-secondary">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-[#3fb950]"></span>
           <span>PartOf</span>
         </div>
-        <div class="legend-item">
-          <span class="legend-circle" style="background:#d29922"></span>
+        <div class="flex items-center gap-2 py-1 text-xs text-text-secondary">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-[#d29922]"></span>
           <span>TemporallyAfter</span>
         </div>
-        <div class="legend-item">
-          <span class="legend-circle" style="background:#f85149"></span>
+        <div class="flex items-center gap-2 py-1 text-xs text-text-secondary">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-[#f85149]"></span>
           <span>Contradicts</span>
         </div>
-        <div class="legend-item">
-          <span class="legend-circle" style="background:#8b949e"></span>
+        <div class="flex items-center gap-2 py-1 text-xs text-text-secondary">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-[#8b949e]"></span>
           <span>References</span>
         </div>
 
-        <div v-if="activation.length > 0" class="activation-section">
-          <h3>激活结果</h3>
-          <div v-for="act in activation.slice(0, 10)" :key="act.id" class="activation-row">
-            <span class="act-id">#{{ act.id }}</span>
-            <div class="act-bar">
-              <div class="act-fill" :style="{ width: (act.activation * 100) + '%' }"></div>
+        <div v-if="activation.length > 0" class="mt-4 border-t border-border-color pt-3">
+          <h3 class="m-0 mb-2 text-[13px] text-text-primary">激活结果</h3>
+          <div v-for="act in activation.slice(0, 10)" :key="act.id" class="flex items-center gap-2 py-1">
+            <span class="font-mono text-[11px] text-accent-primary min-w-[50px]">#{{ act.id }}</span>
+            <div class="flex-1 h-1.5 bg-bg-tertiary rounded-sm overflow-hidden">
+              <div
+                class="h-full rounded-sm bg-gradient-to-r from-accent-primary to-accent-secondary transition-all duration-300"
+                :style="{ width: (act.activation * 100) + '%' }"
+              ></div>
             </div>
-            <span class="act-val">{{ act.activation.toFixed(3) }}</span>
+            <span class="font-mono text-[11px] text-text-secondary min-w-[40px] text-right">{{ act.activation.toFixed(3) }}</span>
           </div>
         </div>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.graph-view {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.toolbar {
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 12px;
-  padding: 16px;
-}
-
-.toolbar-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.input-field {
-  background: #0d1117;
-  border: 1px solid #30363d;
-  border-radius: 8px;
-  padding: 8px 12px;
-  color: #e1e4e8;
-  font-size: 13px;
-  outline: none;
-}
-
-.input-field:focus {
-  border-color: #58a6ff;
-}
-
-.input-field.narrow {
-  width: 80px;
-}
-
-.btn {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: all 0.15s;
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-primary {
-  background: #238636;
-  color: #fff;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: #2ea043;
-}
-
-.btn-secondary {
-  background: #21262d;
-  color: #e1e4e8;
-  border: 1px solid #30363d;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: #30363d;
-}
-
-.alert.error {
-  padding: 10px 16px;
-  background: #3d1414;
-  border: 1px solid #da3633;
-  border-radius: 8px;
-  color: #f85149;
-  font-size: 13px;
-}
-
-.graph-container {
-  display: flex;
-  gap: 16px;
-  min-height: 500px;
-}
-
-.canvas-wrapper {
-  flex: 1;
-  background: #0d1117;
-  border: 1px solid #30363d;
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.graph-svg {
-  display: block;
-}
-
-.legend-panel {
-  width: 220px;
-  flex-shrink: 0;
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 12px;
-  padding: 16px;
-}
-
-.legend-panel h3 {
-  margin: 0 0 10px 0;
-  font-size: 14px;
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  font-size: 12px;
-  color: #8b949e;
-}
-
-.legend-circle {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.activation-section {
-  margin-top: 16px;
-  border-top: 1px solid #30363d;
-  padding-top: 12px;
-}
-
-.activation-section h3 {
-  margin: 0 0 8px 0;
-  font-size: 13px;
-}
-
-.activation-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-}
-
-.act-id {
-  font-family: monospace;
-  font-size: 11px;
-  color: #58a6ff;
-  min-width: 50px;
-}
-
-.act-bar {
-  flex: 1;
-  height: 6px;
-  background: #21262d;
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.act-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #58a6ff, #bc8cff);
-  border-radius: 3px;
-  transition: width 0.3s;
-}
-
-.act-val {
-  font-family: monospace;
-  font-size: 11px;
-  color: #8b949e;
-  min-width: 40px;
-  text-align: right;
-}
-</style>
