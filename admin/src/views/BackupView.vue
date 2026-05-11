@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useApi } from '../composables/useApi'
+import { useToast } from '../composables/useToast'
+import { useAppStore } from '../stores/app'
 
 const api = useApi()
+const toast = useToast()
+const store = useAppStore()
 const backups = ref<string[]>([])
-const loading = ref(false)
-const error = ref<string | null>(null)
-const success = ref<string | null>(null)
+
+const creating = ref(false)
+const restoring = ref(new Set<string>())
+const importing = ref(false)
+const exporting = ref(false)
 
 const importPath = ref('')
 const importFormat = ref('jsonl')
@@ -15,176 +21,207 @@ onMounted(async () => {
   await loadBackups()
 })
 
+watch(() => store.currentNs, () => {
+  loadBackups()
+})
+
 async function loadBackups() {
   try {
-    backups.value = await api.listBackups()
+    backups.value = await api.listBackups(store.currentNs)
   } catch (e: any) {
-    error.value = e.message
+    toast.error(e.message)
   }
 }
 
 async function createBackup() {
-  loading.value = true
-  error.value = null
-  success.value = null
+  creating.value = true
   try {
-    const result = await api.handleBackup('create')
+    const result = await api.handleBackup(store.currentNs, 'create')
     if (result.ok) {
-      success.value = `备份已创建: ${result.snapshot_id}`
+      toast.success(`Backup created: ${result.snapshot_id}`)
       await loadBackups()
     } else {
-      error.value = result.error
+      toast.error(result.error)
     }
   } catch (e: any) {
-    error.value = e.message
+    toast.error(e.message)
   } finally {
-    loading.value = false
+    creating.value = false
   }
 }
 
 async function restoreBackup(snapshotId: string) {
-  if (!confirm(`确定恢复备份 ${snapshotId}？当前数据将被覆盖。`)) return
-  loading.value = true
-  error.value = null
-  success.value = null
+  if (!confirm(`Restore backup ${snapshotId}? Current data will be overwritten.`)) return
+  restoring.value.add(snapshotId)
   try {
-    const result = await api.handleBackup('restore', snapshotId)
+    const result = await api.handleBackup(store.currentNs, 'restore', snapshotId)
     if (result.ok) {
-      success.value = '备份已恢复'
+      toast.success('Backup restored')
+      await Promise.all([loadBackups(), store.fetchInfo(), store.fetchMetrics()])
     } else {
-      error.value = result.error
+      toast.error(result.error)
     }
   } catch (e: any) {
-    error.value = e.message
+    toast.error(e.message)
   } finally {
-    loading.value = false
+    restoring.value.delete(snapshotId)
   }
 }
 
 async function doImport() {
   if (!importPath.value.trim()) {
-    error.value = '请输入文件路径'
+    toast.error('Enter a file path')
     return
   }
-  loading.value = true
-  error.value = null
-  success.value = null
+  importing.value = true
   try {
-    const result = await api.handleImport({ format: importFormat.value, path: importPath.value })
+    const result = await api.handleImport(store.currentNs, { format: importFormat.value, path: importPath.value })
     if (result.ok) {
-      success.value = `导入成功: ${result.imported} 条记忆`
+      toast.success(`Imported ${result.imported} memories`)
     } else {
-      error.value = result.error
+      toast.error(result.error)
     }
   } catch (e: any) {
-    error.value = e.message
+    toast.error(e.message)
   } finally {
-    loading.value = false
+    importing.value = false
   }
 }
 
 async function doExport() {
-  loading.value = true
-  error.value = null
-  success.value = null
+  exporting.value = true
   try {
-    const blob = await api.handleExport()
+    const blob = await api.handleExport(store.currentNs)
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'skymemory_export.json'
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    a.download = `skymemory_export_${ts}.json`
     a.click()
     URL.revokeObjectURL(url)
-    success.value = '导出完成'
+    toast.success('Export complete')
   } catch (e: any) {
-    error.value = e.message
+    toast.error(e.message)
   } finally {
-    loading.value = false
+    exporting.value = false
   }
 }
 
 function formatSnapshotId(id: string): string {
   const ts = id.replace('snap_', '')
   const num = parseInt(ts)
-  if (!isNaN(num)) {
-    return new Date(num).toLocaleString('zh-CN')
-  }
+  if (!isNaN(num)) return new Date(num).toLocaleString('zh-CN')
   return id
 }
+
+const actions = [
+  {
+    key: 'backup',
+    title: 'Create Backup',
+    desc: 'Save all memory nodes as a snapshot',
+    icon: 'floppy-disk',
+    btnText: 'Create Snapshot',
+    btnStyle: 'primary',
+    loading: creating,
+    handler: createBackup,
+  },
+  {
+    key: 'export',
+    title: 'Export Data',
+    desc: 'Export all memories as SkyArchive JSON',
+    icon: 'file-export',
+    btnText: 'Download Export',
+    btnStyle: 'secondary',
+    loading: exporting,
+    handler: doExport,
+  },
+]
 </script>
 
 <template>
   <div class="flex flex-col gap-5">
-    <div v-if="error" class="px-4 py-2.5 bg-red-900/50 border border-red-600 rounded-lg text-red-400 text-sm">{{ error }}</div>
-    <div v-if="success" class="px-4 py-2.5 bg-green-900/50 border border-green-600 rounded-lg text-green-400 text-sm">{{ success }}</div>
-
     <div class="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4">
-      <div class="bg-bg-secondary border border-border-color rounded-xl p-5">
-        <h3 class="m-0 mb-1.5 text-base">创建备份</h3>
-        <p class="text-text-secondary text-sm m-0 mb-3">将当前所有记忆节点保存为快照</p>
+      <div
+        v-for="action in actions"
+        :key="action.key"
+        class="bg-bg-secondary border border-border-color rounded-xl p-5"
+      >
+        <div class="flex items-center gap-2 mb-1.5">
+          <font-awesome-icon :icon="action.icon" class="w-3.5 text-accent-primary" />
+          <h3 class="m-0 text-sm font-semibold">{{ action.title }}</h3>
+        </div>
+        <p class="text-text-muted text-xs m-0 mb-4">{{ action.desc }}</p>
         <button
-          class="px-4 py-2 border-none rounded-lg text-sm cursor-pointer font-medium transition-all duration-150 bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="loading"
-          @click="createBackup"
+          class="flex items-center gap-2 px-4 py-2 border-none rounded-lg text-[13px] font-medium cursor-pointer transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+          :class="action.btnStyle === 'primary'
+            ? 'bg-accent-primary text-white hover:brightness-110'
+            : 'bg-bg-tertiary border border-border-color text-text-secondary hover:border-border-hover hover:text-text-primary'"
+          :disabled="action.loading.value"
+          @click="action.handler"
         >
-          {{ loading ? '处理中...' : '创建快照' }}
+          <font-awesome-icon v-if="action.loading.value" icon="circle-notch" class="w-3.5 animate-spin" />
+          <font-awesome-icon v-else :icon="action.icon" class="w-3.5" />
+          {{ action.loading.value ? 'Processing...' : action.btnText }}
         </button>
       </div>
 
       <div class="bg-bg-secondary border border-border-color rounded-xl p-5">
-        <h3 class="m-0 mb-1.5 text-base">导出数据</h3>
-        <p class="text-text-secondary text-sm m-0 mb-3">将所有记忆导出为 SkyArchive JSON 文件</p>
-        <button
-          class="px-4 py-2 border border-border-color rounded-lg text-sm cursor-pointer font-medium transition-all duration-150 bg-bg-tertiary text-text-primary hover:bg-bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="loading"
-          @click="doExport"
-        >
-          下载导出文件
-        </button>
-      </div>
-
-      <div class="bg-bg-secondary border border-border-color rounded-xl p-5">
-        <h3 class="m-0 mb-1.5 text-base">导入数据</h3>
-        <p class="text-text-secondary text-sm m-0 mb-3">从文件导入记忆节点</p>
+        <div class="flex items-center gap-2 mb-1.5">
+          <font-awesome-icon icon="file-import" class="w-3.5 text-accent-primary" />
+          <h3 class="m-0 text-sm font-semibold">Import Data</h3>
+        </div>
+        <p class="text-text-muted text-xs m-0 mb-4">Import memories from file</p>
         <div class="flex flex-col gap-2">
           <input
             v-model="importPath"
-            placeholder="文件路径"
-            class="w-full bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-sm outline-none transition-all duration-150 focus:border-accent-primary"
+            placeholder="File path"
+            class="w-full bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-[13px] outline-none transition-all duration-150 focus:border-accent-primary placeholder:text-text-muted"
           />
-          <select
-            v-model="importFormat"
-            class="bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-sm outline-none transition-all duration-150 focus:border-accent-primary"
-          >
-            <option value="jsonl">JSONL</option>
-            <option value="csv">CSV</option>
-            <option value="archive">SkyArchive</option>
-          </select>
-          <button
-            class="px-4 py-2 border-none rounded-lg text-sm cursor-pointer font-medium transition-all duration-150 bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            :disabled="loading"
-            @click="doImport"
-          >
-            导入
-          </button>
+          <div class="flex gap-2">
+            <select
+              v-model="importFormat"
+              class="flex-1 bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-[13px] outline-none transition-all duration-150 focus:border-accent-primary"
+            >
+              <option value="jsonl">JSONL</option>
+              <option value="csv">CSV</option>
+              <option value="archive">SkyArchive</option>
+            </select>
+            <button
+              class="flex items-center gap-2 px-4 py-2 border-none rounded-lg text-[13px] font-medium cursor-pointer transition-all duration-150 bg-accent-primary text-white hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+              :disabled="importing"
+              @click="doImport"
+            >
+              <font-awesome-icon v-if="importing" icon="circle-notch" class="w-3.5 animate-spin" />
+              <font-awesome-icon v-else icon="file-import" class="w-3.5" />
+              {{ importing ? 'Importing...' : 'Import' }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
 
     <div class="bg-bg-secondary border border-border-color rounded-xl p-5">
-      <h3 class="m-0 mb-3 text-base">历史备份 ({{ backups.length }})</h3>
-      <div v-if="backups.length === 0" class="text-text-secondary text-sm text-center py-6">暂无备份</div>
-      <div v-for="snap in backups" :key="snap" class="flex justify-between items-center py-2.5 border-b border-bg-tertiary">
+      <div class="flex items-center gap-2 mb-4">
+        <font-awesome-icon icon="history" class="w-3.5 text-text-muted" />
+        <h3 class="m-0 text-sm font-semibold">Snapshots</h3>
+        <span class="px-1.5 py-0.5 bg-bg-tertiary rounded text-[10px] font-mono text-text-muted">{{ backups.length }}</span>
+      </div>
+      <div v-if="backups.length === 0" class="text-text-muted text-xs text-center py-8">
+        No backups yet
+      </div>
+      <div v-for="snap in backups" :key="snap" class="flex justify-between items-center py-3 border-b border-border-color last:border-0">
         <div class="flex flex-col gap-0.5">
-          <span class="font-mono text-sm text-accent-primary">{{ snap }}</span>
-          <span class="text-xs text-text-secondary">{{ formatSnapshotId(snap) }}</span>
+          <span class="font-mono text-xs font-medium text-accent-primary">{{ snap }}</span>
+          <span class="text-[10px] text-text-muted">{{ formatSnapshotId(snap) }}</span>
         </div>
         <button
-          class="px-2.5 py-1 border border-border-color rounded-lg text-xs cursor-pointer font-medium transition-all duration-150 bg-bg-tertiary text-text-primary hover:bg-bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="loading"
+          class="flex items-center gap-1.5 px-3 py-1.5 border border-border-color rounded-lg text-[11px] font-medium cursor-pointer transition-all duration-150 bg-bg-tertiary text-text-secondary hover:border-border-hover hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
+          :disabled="restoring.has(snap)"
           @click="restoreBackup(snap)"
         >
-          恢复
+          <font-awesome-icon v-if="restoring.has(snap)" icon="circle-notch" class="w-3 animate-spin" />
+          <font-awesome-icon v-else icon="rotate" class="w-3" />
+          {{ restoring.has(snap) ? 'Restoring...' : 'Restore' }}
         </button>
       </div>
     </div>

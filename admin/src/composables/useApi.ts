@@ -5,6 +5,14 @@ const client = axios.create({
   timeout: 30000,
 })
 
+export interface NamespaceInfo {
+  name: string
+  dimension: number
+  node_count: number
+  edge_count: number
+  created_at: number
+}
+
 export interface MemoryItem {
   id: number
   score: number
@@ -39,8 +47,6 @@ export interface EdgeItem {
   weight: number
 }
 
-// ── Database types ──────────────────────────────────────────
-
 export interface DbConnectionInfo {
   name: string
   db_type: string
@@ -65,113 +71,144 @@ export interface DbImportResult {
 }
 
 export function useApi() {
-  async function getInfo(): Promise<InfoResp> {
-    const { data } = await client.get('/api/info')
+  // ── Namespace management ──────────────────────────────────
+
+  async function listNamespaces(): Promise<NamespaceInfo[]> {
+    const { data } = await client.get('/api/namespaces')
     return data
   }
 
-  async function getMetrics(): Promise<SystemMetrics> {
-    const { data } = await client.get('/api/metrics')
+  async function createNamespace(name: string, dimension?: number): Promise<NamespaceInfo> {
+    const { data } = await client.post('/api/namespaces', { name, dimension })
     return data
   }
 
-  async function insertMemory(payload: {
+  async function deleteNamespace(name: string): Promise<void> {
+    await client.delete(`/api/namespaces/${name}`)
+  }
+
+  async function getNamespaceInfo(name: string): Promise<NamespaceInfo> {
+    const { data } = await client.get(`/api/namespaces/${name}/info`)
+    return data
+  }
+
+  // ── Info & metrics ────────────────────────────────────────
+
+  async function getInfo(ns: string): Promise<InfoResp> {
+    const { data } = await client.get(`/api/ns/${ns}/info`)
+    return data
+  }
+
+  async function getMetrics(ns: string): Promise<SystemMetrics> {
+    const { data } = await client.get(`/api/ns/${ns}/metrics`)
+    return data
+  }
+
+  // ── Memories ──────────────────────────────────────────────
+
+  async function insertMemory(ns: string, payload: {
     vector: number[]
     metadata: Record<string, string>
     memory_type?: string
   }): Promise<{ ok: boolean; id: number }> {
-    const { data } = await client.post('/api/memories', payload)
+    const { data } = await client.post(`/api/ns/${ns}/memories`, payload)
     return data
   }
 
-  async function getMemory(id: number): Promise<MemoryItem> {
-    const { data } = await client.get(`/api/memories/${id}`)
+  async function getMemory(ns: string, id: number): Promise<MemoryItem> {
+    const { data } = await client.get(`/api/ns/${ns}/memories/${id}`)
     return data
   }
 
-  async function deleteMemory(id: number): Promise<void> {
-    await client.delete(`/api/memories/${id}`)
+  async function deleteMemory(ns: string, id: number): Promise<void> {
+    await client.delete(`/api/ns/${ns}/memories/${id}`)
   }
 
-  async function accessMemory(id: number): Promise<void> {
-    await client.post(`/api/memories/${id}/access`)
+  async function accessMemory(ns: string, id: number): Promise<void> {
+    await client.post(`/api/ns/${ns}/memories/${id}/access`)
   }
 
-  async function search(payload: {
+  // ── Search & query ────────────────────────────────────────
+
+  async function search(ns: string, payload: {
     vector: number[]
     k?: number
     metric?: string
   }): Promise<MemoryItem[]> {
-    const { data } = await client.post('/api/search', payload)
+    const { data } = await client.post(`/api/ns/${ns}/search`, payload)
     return data
   }
 
-  async function queryExec(payload: {
+  async function queryExec(ns: string, payload: {
     query: string
     k?: number
     metric?: string
   }): Promise<any[]> {
-    const { data } = await client.post('/api/query', payload)
+    const { data } = await client.post(`/api/ns/${ns}/query`, payload)
     return data
   }
 
-  async function addEdge(payload: {
+  // ── Graph ─────────────────────────────────────────────────
+
+  async function addEdge(ns: string, payload: {
     from: number
     to: number
     edge_type: string
     weight?: number
   }): Promise<void> {
-    await client.post('/api/edges', payload)
+    await client.post(`/api/ns/${ns}/edges`, payload)
   }
 
-  async function getEdges(id: number): Promise<EdgeItem[]> {
-    const { data } = await client.get(`/api/edges/${id}`)
+  async function getEdges(ns: string, id: number): Promise<EdgeItem[]> {
+    const { data } = await client.get(`/api/ns/${ns}/edges/${id}`)
     return data
   }
 
-  async function graphTraverse(payload: {
+  async function graphTraverse(ns: string, payload: {
     start: number
     depth?: number
     edge_type?: string
   }): Promise<any[]> {
-    const { data } = await client.post('/api/graph/traverse', payload)
+    const { data } = await client.post(`/api/ns/${ns}/graph/traverse`, payload)
     return data
   }
 
-  async function spreadingActivation(payload: {
+  async function spreadingActivation(ns: string, payload: {
     start: number
     decay_factor?: number
     threshold?: number
     max_hops?: number
   }): Promise<any[]> {
-    const { data } = await client.post('/api/graph/activate', payload)
+    const { data } = await client.post(`/api/ns/${ns}/graph/activate`, payload)
     return data
   }
 
-  async function handleBackup(action: string, snapshot_id?: string): Promise<any> {
-    const { data } = await client.post('/api/backup', { action, snapshot_id })
+  // ── Backup & import/export ────────────────────────────────
+
+  async function handleBackup(ns: string, action: string, snapshot_id?: string): Promise<any> {
+    const { data } = await client.post(`/api/ns/${ns}/backup`, { action, snapshot_id })
     return data
   }
 
-  async function listBackups(): Promise<string[]> {
-    const { data } = await client.get('/api/backups')
+  async function listBackups(ns: string): Promise<string[]> {
+    const { data } = await client.get(`/api/ns/${ns}/backups`)
     return data
   }
 
-  async function handleImport(payload: {
+  async function handleImport(ns: string, payload: {
     format: string
     path: string
   }): Promise<any> {
-    const { data } = await client.post('/api/import', payload)
+    const { data } = await client.post(`/api/ns/${ns}/import`, payload)
     return data
   }
 
-  async function handleExport(): Promise<Blob> {
-    const { data } = await client.post('/api/export', {}, { responseType: 'blob' })
+  async function handleExport(ns: string): Promise<Blob> {
+    const { data } = await client.post(`/api/ns/${ns}/export`, {}, { responseType: 'blob' })
     return data
   }
 
-  // ── Database API ────────────────────────────────────────────
+  // ── Database API ──────────────────────────────────────────
 
   async function dbConnect(payload: {
     name: string
@@ -213,18 +250,22 @@ export function useApi() {
     return data
   }
 
-  async function dbImportToVector(payload: {
+  async function dbImportToVector(ns: string, payload: {
     connection: string
     sql: string
     vector_column: string
     metadata_columns?: string[]
     memory_type?: string
   }): Promise<DbImportResult> {
-    const { data } = await client.post('/api/db/import', payload)
+    const { data } = await client.post(`/api/db/import/${ns}`, payload)
     return data
   }
 
   return {
+    listNamespaces,
+    createNamespace,
+    deleteNamespace,
+    getNamespaceInfo,
     getInfo,
     getMetrics,
     insertMemory,

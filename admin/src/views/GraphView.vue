@@ -1,21 +1,25 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useApi } from '../composables/useApi'
+import { useToast } from '../composables/useToast'
+import { useAppStore } from '../stores/app'
 
 const api = useApi()
+const toast = useToast()
+const store = useAppStore()
 const startId = ref<number | null>(null)
 const traverseDepth = ref(2)
 const edgeTypeFilter = ref('')
 const nodes = ref<any[]>([])
 const edges = ref<any[]>([])
 const activation = ref<any[]>([])
-const loading = ref(false)
-const error = ref<string | null>(null)
+const traversing = ref(false)
+const activating = ref(false)
 
 const nodePositions = ref<Record<number, { x: number; y: number }>>({})
 
 const edgeTypes = [
-  { value: '', label: '全部' },
+  { value: '', label: 'All Types' },
   { value: 'similar_to', label: 'SimilarTo' },
   { value: 'derived_from', label: 'DerivedFrom' },
   { value: 'part_of', label: 'PartOf' },
@@ -24,12 +28,13 @@ const edgeTypes = [
   { value: 'references', label: 'References' },
 ]
 
+const loading = computed(() => traversing.value || activating.value)
+
 async function doTraverse() {
   if (startId.value === null) return
-  loading.value = true
-  error.value = null
+  traversing.value = true
   try {
-    const result = await api.graphTraverse({
+    const result = await api.graphTraverse(store.currentNs, {
       start: startId.value,
       depth: traverseDepth.value,
       edge_type: edgeTypeFilter.value || undefined,
@@ -37,34 +42,33 @@ async function doTraverse() {
     nodes.value = result
     edges.value = []
     layoutNodes(result)
-    for (const node of result) {
-      try {
-        const edgeList = await api.getEdges(node.id)
-        edges.value.push(...edgeList)
-      } catch {}
-    }
+    const edgeLists = await Promise.all(
+      result.map(node => api.getEdges(store.currentNs, node.id).catch(() => []))
+    )
+    edges.value = edgeLists.flat()
+    toast.info(`Traversed ${result.length} nodes, ${edges.value.length} edges`)
   } catch (e: any) {
-    error.value = e.message
+    toast.error(e.message)
   } finally {
-    loading.value = false
+    traversing.value = false
   }
 }
 
 async function doActivate() {
   if (startId.value === null) return
-  loading.value = true
-  error.value = null
+  activating.value = true
   try {
-    activation.value = await api.spreadingActivation({
+    activation.value = await api.spreadingActivation(store.currentNs, {
       start: startId.value,
       decay_factor: 0.5,
       threshold: 0.1,
       max_hops: 3,
     })
+    toast.info(`Activation complete: ${activation.value.length} nodes`)
   } catch (e: any) {
-    error.value = e.message
+    toast.error(e.message)
   } finally {
-    loading.value = false
+    activating.value = false
   }
 }
 
@@ -73,33 +77,39 @@ function layoutNodes(nodeList: any[]) {
   const cx = 300
   const cy = 200
   const maxDepth = Math.max(...nodeList.map(n => n.depth), 1)
-
+  const depthGroups: Record<number, number[]> = {}
   for (const node of nodeList) {
-    const depthRatio = node.depth / maxDepth
-    const angle = (positions[0] ? Math.random() : 0) + node.id % 360
-    const radius = 40 + depthRatio * 200
-    positions[node.id] = {
-      x: cx + radius * Math.cos(angle * Math.PI / 180),
-      y: cy + radius * Math.sin(angle * Math.PI / 180),
-    }
+    if (!depthGroups[node.depth]) depthGroups[node.depth] = []
+    depthGroups[node.depth].push(node.id)
+  }
+  for (const [depth, ids] of Object.entries(depthGroups)) {
+    const d = Number(depth)
+    const radius = 40 + (d / maxDepth) * 200
+    ids.forEach((id, i) => {
+      const angle = (2 * Math.PI * i) / ids.length + d * 0.5
+      positions[id] = {
+        x: cx + radius * Math.cos(angle),
+        y: cy + radius * Math.sin(angle),
+      }
+    })
   }
   nodePositions.value = positions
 }
 
 function getEdgeColor(edgeType: string): string {
   const colors: Record<string, string> = {
-    SimilarTo: '#58a6ff',
-    DerivedFrom: '#bc8cff',
+    SimilarTo: '#f6821f',
+    DerivedFrom: '#fbad41',
     PartOf: '#3fb950',
-    TemporallyAfter: '#d29922',
-    Contradicts: '#f85149',
-    References: '#8b949e',
+    TemporallyAfter: '#eab308',
+    Contradicts: '#ef4444',
+    References: '#6b6c72',
   }
-  return colors[edgeType] || '#8b949e'
+  return colors[edgeType] || '#6b6c72'
 }
 
 function getNodeColor(depth: number): string {
-  const colors = ['#58a6ff', '#3fb950', '#d29922', '#bc8cff', '#f85149']
+  const colors = ['#f6821f', '#fbad41', '#3fb950', '#3b82f6', '#a855f7']
   return colors[depth % colors.length]
 }
 
@@ -109,55 +119,68 @@ function getActivationOpacity(nodeId: number): number {
   return 0.3 + act.activation * 0.7
 }
 
+const legendItems = [
+  { label: 'SimilarTo', color: '#f6821f' },
+  { label: 'DerivedFrom', color: '#fbad41' },
+  { label: 'PartOf', color: '#3fb950' },
+  { label: 'TemporallyAfter', color: '#eab308' },
+  { label: 'Contradicts', color: '#ef4444' },
+  { label: 'References', color: '#6b6c72' },
+]
 </script>
 
 <template>
   <div class="flex flex-col gap-4">
     <div class="bg-bg-secondary border border-border-color rounded-xl p-4">
       <div class="flex gap-2 flex-wrap items-center">
-        <input
-          v-model.number="startId"
-          type="number"
-          placeholder="起始节点 ID"
-          class="bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-sm outline-none transition-all duration-150 focus:border-accent-primary"
-        />
+        <div class="relative">
+          <font-awesome-icon icon="hashtag" class="absolute left-3 top-1/2 -translate-y-1/2 w-3 text-text-muted" />
+          <input
+            v-model.number="startId"
+            type="number"
+            placeholder="Start Node ID"
+            class="w-36 bg-bg-primary border border-border-color rounded-lg pl-8 pr-3 py-2 text-text-primary text-[13px] outline-none transition-all duration-150 focus:border-accent-primary placeholder:text-text-muted"
+          />
+        </div>
         <input
           v-model.number="traverseDepth"
           type="number"
           min="1"
           max="5"
-          placeholder="深度"
-          class="w-20 bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-sm outline-none transition-all duration-150 focus:border-accent-primary"
+          placeholder="Depth"
+          class="w-20 bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-[13px] outline-none transition-all duration-150 focus:border-accent-primary placeholder:text-text-muted"
         />
         <select
           v-model="edgeTypeFilter"
-          class="bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-sm outline-none transition-all duration-150 focus:border-accent-primary"
+          class="bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-[13px] outline-none transition-all duration-150 focus:border-accent-primary"
         >
           <option v-for="et in edgeTypes" :key="et.value" :value="et.value">
             {{ et.label }}
           </option>
         </select>
         <button
-          class="px-4 py-2 border-none rounded-lg text-sm cursor-pointer font-medium transition-all duration-150 bg-green-600 text-white hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="flex items-center gap-2 px-4 py-2 border-none rounded-lg text-[13px] font-medium cursor-pointer transition-all duration-150 bg-accent-primary text-white hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
           :disabled="loading"
           @click="doTraverse"
         >
-          遍历
+          <font-awesome-icon v-if="traversing" icon="circle-notch" class="w-3.5 animate-spin" />
+          <font-awesome-icon v-else icon="diagram-project" class="w-3.5" />
+          {{ traversing ? 'Traversing...' : 'Traverse' }}
         </button>
         <button
-          class="px-4 py-2 border border-border-color rounded-lg text-sm cursor-pointer font-medium transition-all duration-150 bg-bg-tertiary text-text-primary hover:bg-bg-elevated disabled:opacity-50 disabled:cursor-not-allowed"
+          class="flex items-center gap-2 px-3 py-2 border border-border-color rounded-lg text-[13px] font-medium cursor-pointer transition-all duration-150 bg-bg-tertiary text-text-secondary hover:border-border-hover hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
           :disabled="loading"
           @click="doActivate"
         >
-          扩散激活
+          <font-awesome-icon v-if="activating" icon="circle-notch" class="w-3.5 animate-spin" />
+          <font-awesome-icon v-else icon="wave-square" class="w-3.5" />
+          {{ activating ? 'Activating...' : 'Activate' }}
         </button>
       </div>
     </div>
 
-    <div v-if="error" class="px-4 py-2.5 bg-red-900/50 border border-red-600 rounded-lg text-red-400 text-sm">{{ error }}</div>
-
     <div class="flex gap-4 min-h-[500px]">
-      <div class="flex-1 bg-bg-primary border border-border-color rounded-xl overflow-hidden">
+      <div class="flex-1 bg-bg-secondary border border-border-color rounded-xl overflow-hidden">
         <svg width="100%" height="500" class="block">
           <line
             v-for="(edge, i) in edges"
@@ -168,7 +191,7 @@ function getActivationOpacity(nodeId: number): number {
             :y2="nodePositions[edge.to]?.y ?? 0"
             :stroke="getEdgeColor(edge.edge_type)"
             stroke-width="1.5"
-            stroke-opacity="0.4"
+            stroke-opacity="0.3"
           />
           <g v-for="node in nodes" :key="node.id">
             <circle
@@ -177,16 +200,16 @@ function getActivationOpacity(nodeId: number): number {
               :r="12 + (node.weight ?? 1) * 8"
               :fill="getNodeColor(node.depth)"
               :fill-opacity="getActivationOpacity(node.id)"
-              stroke="#30363d"
+              stroke="#2a2b2e"
               stroke-width="1.5"
             />
             <text
               :x="nodePositions[node.id]?.x ?? 0"
               :y="(nodePositions[node.id]?.y ?? 0) + 4"
               text-anchor="middle"
-              fill="#e1e4e8"
+              fill="#f0f1f2"
               font-size="10"
-              font-family="monospace"
+              font-family="JetBrains Mono, monospace"
             >
               {{ node.id }}
             </text>
@@ -195,43 +218,23 @@ function getActivationOpacity(nodeId: number): number {
       </div>
 
       <div v-if="nodes.length > 0" class="w-[220px] flex-shrink-0 bg-bg-secondary border border-border-color rounded-xl p-4">
-        <h3 class="m-0 mb-2.5 text-sm text-text-primary">图例</h3>
-        <div class="flex items-center gap-2 py-1 text-xs text-text-secondary">
-          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-[#58a6ff]"></span>
-          <span>SimilarTo</span>
-        </div>
-        <div class="flex items-center gap-2 py-1 text-xs text-text-secondary">
-          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-[#bc8cff]"></span>
-          <span>DerivedFrom</span>
-        </div>
-        <div class="flex items-center gap-2 py-1 text-xs text-text-secondary">
-          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-[#3fb950]"></span>
-          <span>PartOf</span>
-        </div>
-        <div class="flex items-center gap-2 py-1 text-xs text-text-secondary">
-          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-[#d29922]"></span>
-          <span>TemporallyAfter</span>
-        </div>
-        <div class="flex items-center gap-2 py-1 text-xs text-text-secondary">
-          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-[#f85149]"></span>
-          <span>Contradicts</span>
-        </div>
-        <div class="flex items-center gap-2 py-1 text-xs text-text-secondary">
-          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-[#8b949e]"></span>
-          <span>References</span>
+        <h3 class="m-0 mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">Legend</h3>
+        <div v-for="item in legendItems" :key="item.label" class="flex items-center gap-2.5 py-1.5">
+          <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: item.color }"></span>
+          <span class="text-xs text-text-secondary">{{ item.label }}</span>
         </div>
 
         <div v-if="activation.length > 0" class="mt-4 border-t border-border-color pt-3">
-          <h3 class="m-0 mb-2 text-[13px] text-text-primary">激活结果</h3>
+          <h3 class="m-0 mb-2 text-xs font-semibold uppercase tracking-wider text-text-muted">Activation</h3>
           <div v-for="act in activation.slice(0, 10)" :key="act.id" class="flex items-center gap-2 py-1">
-            <span class="font-mono text-[11px] text-accent-primary min-w-[50px]">#{{ act.id }}</span>
-            <div class="flex-1 h-1.5 bg-bg-tertiary rounded-sm overflow-hidden">
+            <span class="font-mono text-[10px] text-accent-primary min-w-[40px]">#{{ act.id }}</span>
+            <div class="flex-1 h-1.5 bg-bg-tertiary rounded-full overflow-hidden">
               <div
-                class="h-full rounded-sm bg-gradient-to-r from-accent-primary to-accent-secondary transition-all duration-300"
+                class="h-full rounded-full bg-gradient-to-r from-accent-primary to-accent-secondary transition-all duration-300"
                 :style="{ width: (act.activation * 100) + '%' }"
               ></div>
             </div>
-            <span class="font-mono text-[11px] text-text-secondary min-w-[40px] text-right">{{ act.activation.toFixed(3) }}</span>
+            <span class="font-mono text-[10px] text-text-muted min-w-[36px] text-right">{{ act.activation.toFixed(3) }}</span>
           </div>
         </div>
       </div>

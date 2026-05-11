@@ -10,6 +10,7 @@ skymemory-graph = { path = "../graph" }
 skymemory-property = { path = "../property" }
 skymemory-temporal = { path = "../temporal" }
 skymemory-query = { path = "../query" }
+skymemory-storage = { path = "../storage" }
 skymemory-backup = { path = "../backup" }
 skymemory-import-export = { path = "../import_export" }
 skymemory-database = { path = "../database" }

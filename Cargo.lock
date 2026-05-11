@@ -1570,6 +1570,7 @@ dependencies = [
  "skymemory-import-export",
  "skymemory-property",
  "skymemory-query",
+ "skymemory-storage",
  "skymemory-temporal",
  "skymemory-vector",
  "thiserror 1.0.69",

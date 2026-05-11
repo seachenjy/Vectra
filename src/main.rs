@@ -5,6 +5,7 @@ use skymemory_query::QueryEngine;
 use skymemory_query::parse_query;
 use skymemory_backup::BackupManager;
 use skymemory_import_export as import_export;
+use skymemory_api::NamespaceManager;
 
 #[derive(Parser)]
 #[command(name = "skymemory")]
@@ -111,9 +112,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::Serve { addr } => {
-            let (engine, _seg_mgr) = build_engine(&cli.dir, cli.dimension)?;
-            let backup = BackupManager::new(&cli.dir);
-            let app = skymemory_api::build_router(engine, backup, cli.dimension);
+            let namespaces = NamespaceManager::new(&cli.dir, cli.dimension)?;
+            let app = skymemory_api::build_router(namespaces, cli.dimension).await;
             println!("SkyMemory listening on http://{}", addr);
             let listener = tokio::net::TcpListener::bind(&addr).await?;
             axum::serve(listener, app).await?;

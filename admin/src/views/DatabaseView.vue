@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useApi } from '../composables/useApi'
+import { useAppStore } from '../stores/app'
 import type { DbConnectionInfo, DbQueryResult } from '../composables/useApi'
 
 const api = useApi()
+const store = useAppStore()
 
 const connections = ref<DbConnectionInfo[]>([])
 const activeConn = ref<string | null>(null)
@@ -222,7 +224,7 @@ async function doImport() {
       .map(s => s.trim())
       .filter(Boolean)
 
-    const result = await api.dbImportToVector({
+    const result = await api.dbImportToVector(store.currentNs, {
       connection: activeConn.value,
       sql: sqlText.value,
       vector_column: importForm.value.vector_column,

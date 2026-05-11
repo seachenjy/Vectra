@@ -6,33 +6,31 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 use skymemory_core::{Edge, EdgeType, MemoryNode, MemoryType, Metric, Property, Value, generate_node_id, now_millis, TemporalInfo};
-use skymemory_query::QueryEngine;
 use skymemory_query::parse_query;
-use skymemory_backup::BackupManager;
 use skymemory_import_export as import_export;
 use skymemory_database::{DatabaseManager, DbConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 
+use crate::namespace::NamespaceManager;
 use crate::types::*;
 
-struct EngineState {
-    engine: RwLock<QueryEngine>,
-    backup: BackupManager,
-    dimension: usize,
+struct AppStateInner {
+    namespaces: NamespaceManager,
     db_manager: DatabaseManager,
+    default_dimension: usize,
 }
 
-type AppState = Arc<EngineState>;
+type AppState = Arc<AppStateInner>;
 
-pub fn build_router(engine: QueryEngine, backup: BackupManager, dimension: usize) -> Router {
-    let state: AppState = Arc::new(EngineState {
-        engine: RwLock::new(engine),
-        backup,
-        dimension,
+pub async fn build_router(namespaces: NamespaceManager, dimension: usize) -> Router {
+    namespaces.initialize().await.expect("failed to initialize namespaces");
+
+    let state: AppState = Arc::new(AppStateInner {
+        namespaces,
         db_manager: DatabaseManager::new(),
+        default_dimension: dimension,
     });
 
     let cors = CorsLayer::new()
@@ -41,23 +39,26 @@ pub fn build_router(engine: QueryEngine, backup: BackupManager, dimension: usize
         .allow_headers(Any);
 
     Router::new()
-        .route("/api/memories", post(insert_memory))
-        .route("/api/memories/:id", get(get_memory))
-        .route("/api/memories/:id", delete(delete_memory))
-        .route("/api/memories/:id/access", post(access_memory))
-        .route("/api/search", post(search))
-        .route("/api/query", post(query_exec))
-        .route("/api/info", get(info))
-        .route("/api/metrics", get(metrics))
-        .route("/api/edges", post(add_edge))
-        .route("/api/edges/:id", get(get_edges))
-        .route("/api/backup", post(handle_backup))
-        .route("/api/backups", get(list_backups))
-        .route("/api/import", post(handle_import))
-        .route("/api/export", post(handle_export))
-        .route("/api/graph/traverse", post(graph_traverse))
-        .route("/api/graph/activate", post(spreading_activation))
-        // Database routes
+        .route("/api/namespaces", get(list_namespaces))
+        .route("/api/namespaces", post(create_namespace))
+        .route("/api/namespaces/:ns", delete(delete_namespace))
+        .route("/api/namespaces/:ns/info", get(namespace_info))
+        .route("/api/ns/:ns/memories", post(insert_memory))
+        .route("/api/ns/:ns/memories/:id", get(get_memory))
+        .route("/api/ns/:ns/memories/:id", delete(delete_memory))
+        .route("/api/ns/:ns/memories/:id/access", post(access_memory))
+        .route("/api/ns/:ns/search", post(search))
+        .route("/api/ns/:ns/query", post(query_exec))
+        .route("/api/ns/:ns/info", get(info))
+        .route("/api/ns/:ns/metrics", get(metrics))
+        .route("/api/ns/:ns/edges", post(add_edge))
+        .route("/api/ns/:ns/edges/:id", get(get_edges))
+        .route("/api/ns/:ns/backup", post(handle_backup))
+        .route("/api/ns/:ns/backups", get(list_backups))
+        .route("/api/ns/:ns/import", post(handle_import))
+        .route("/api/ns/:ns/export", post(handle_export))
+        .route("/api/ns/:ns/graph/traverse", post(graph_traverse))
+        .route("/api/ns/:ns/graph/activate", post(spreading_activation))
         .route("/api/db/connect", post(db_connect))
         .route("/api/db/disconnect", post(db_disconnect))
         .route("/api/db/connections", get(db_list_connections))
@@ -65,16 +66,64 @@ pub fn build_router(engine: QueryEngine, backup: BackupManager, dimension: usize
         .route("/api/db/tables", post(db_list_tables))
         .route("/api/db/describe", post(db_describe_table))
         .route("/api/db/test", post(db_test_connection))
-        .route("/api/db/import", post(db_import_to_vector))
+        .route("/api/db/import/:ns", post(db_import_to_vector))
         .layer(cors)
         .with_state(state)
 }
 
+async fn list_namespaces(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let list = state.namespaces.list_namespaces().await;
+    Json(json!(list))
+}
+
+#[derive(Deserialize)]
+struct CreateNamespaceReq {
+    name: String,
+    dimension: Option<usize>,
+}
+
+async fn create_namespace(
+    State(state): State<AppState>,
+    Json(req): Json<CreateNamespaceReq>,
+) -> impl IntoResponse {
+    let dim = req.dimension.unwrap_or(state.default_dimension);
+    match state.namespaces.create_namespace(&req.name, dim).await {
+        Ok(info) => Json(json!(info)),
+        Err(e) => Json(json!({"error": e.to_string()})),
+    }
+}
+
+async fn delete_namespace(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    match state.namespaces.delete_namespace(&name).await {
+        Ok(()) => Json(json!({"ok": true})),
+        Err(e) => Json(json!({"error": e.to_string()})),
+    }
+}
+
+async fn namespace_info(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    match state.namespaces.get_namespace(&name).await {
+        Some(ns) => Json(json!(ns.info())),
+        None => Json(json!({"error": format!("namespace '{}' not found", name)})),
+    }
+}
+
 async fn insert_memory(
     State(state): State<AppState>,
+    Path(ns_name): Path<String>,
     Json(req): Json<CreateMemoryReq>,
 ) -> impl IntoResponse {
-    let engine = state.engine.write().await;
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
     let mem_type = match req.memory_type.as_deref() {
         Some("episodic") => MemoryType::Episodic,
         _ => MemoryType::Semantic,
@@ -91,7 +140,7 @@ async fn insert_memory(
         memory_type: mem_type,
     };
     let id = node.id;
-    match engine.insert_node(node) {
+    match ns.engine.insert_node(node) {
         Ok(()) => Json(json!({"ok": true, "id": id})),
         Err(e) => Json(json!({"error": e.to_string()})),
     }
@@ -99,10 +148,13 @@ async fn insert_memory(
 
 async fn get_memory(
     State(state): State<AppState>,
-    Path(id): Path<u64>,
+    Path((ns_name, id)): Path<(String, u64)>,
 ) -> impl IntoResponse {
-    let engine = state.engine.read().await;
-    match engine.get_node(id) {
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
+    match ns.engine.get_node(id) {
         Some(node) => {
             let metadata: HashMap<String, String> = node.properties.iter()
                 .map(|p| (p.key.clone(), p.value.to_string()))
@@ -125,28 +177,39 @@ async fn get_memory(
 
 async fn delete_memory(
     State(state): State<AppState>,
-    Path(id): Path<u64>,
+    Path((ns_name, id)): Path<(String, u64)>,
 ) -> impl IntoResponse {
-    let engine = state.engine.write().await;
-    engine.remove_node(id);
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
+    ns.engine.remove_node(id);
     Json(json!({"ok": true}))
 }
 
 async fn access_memory(
     State(state): State<AppState>,
-    Path(id): Path<u64>,
+    Path((ns_name, id)): Path<(String, u64)>,
 ) -> impl IntoResponse {
-    let engine = state.engine.write().await;
-    let mut ts = engine.temporal_store.write();
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
+    let mut ts = ns.engine.temporal_store.write();
     ts.record_access(id);
     Json(json!({"ok": true}))
 }
 
 async fn search(
     State(state): State<AppState>,
+    Path(ns_name): Path<String>,
     Json(req): Json<SearchReq>,
 ) -> impl IntoResponse {
-    let engine = state.engine.read().await;
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
+    let engine = &ns.engine;
     let metric = Metric::from_code(req.metric.as_deref().unwrap_or("cs")).unwrap_or(Metric::Cosine);
     let k = req.k.unwrap_or(10);
     let node_data = engine.node_data.read();
@@ -182,16 +245,20 @@ async fn search(
 
 async fn query_exec(
     State(state): State<AppState>,
+    Path(ns_name): Path<String>,
     Json(req): Json<QueryReq>,
 ) -> impl IntoResponse {
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
     let parsed = match parse_query(&req.query) {
         Ok(q) => q,
         Err(e) => return Json(json!({"error": e.to_string()})),
     };
-    let engine = state.engine.read().await;
     let metric = Metric::from_code(req.metric.as_deref().unwrap_or("cs")).unwrap_or(Metric::Cosine);
     let k = req.k.unwrap_or(10);
-    let results = match engine.execute(&parsed, k, &metric) {
+    let results = match ns.engine.execute(&parsed, k, &metric) {
         Ok(r) => r,
         Err(e) => return Json(json!({"error": e.to_string()})),
     };
@@ -211,24 +278,36 @@ async fn query_exec(
     Json(json!(items))
 }
 
-async fn info(State(state): State<AppState>) -> impl IntoResponse {
-    let engine = state.engine.read().await;
-    let node_count = engine.node_count();
-    let edge_count = engine.graph_store.read().edge_count();
-    let schema = engine.property_store.read().schema();
+async fn info(
+    State(state): State<AppState>,
+    Path(ns_name): Path<String>,
+) -> impl IntoResponse {
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
+    let node_count = ns.engine.node_count();
+    let edge_count = ns.engine.graph_store.read().edge_count();
+    let schema = ns.engine.property_store.read().schema();
     Json(json!(InfoResp {
         node_count,
         edge_count,
-        dimension: state.dimension,
+        dimension: ns.dimension,
         property_schema: schema,
     }))
 }
 
-async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
-    let engine = state.engine.read().await;
-    let total_nodes = engine.node_count();
-    let total_edges = engine.graph_store.read().edge_count();
-    let (hot, cold) = engine.temporal_store.read().hot_cold_separation(0.3);
+async fn metrics(
+    State(state): State<AppState>,
+    Path(ns_name): Path<String>,
+) -> impl IntoResponse {
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
+    let total_nodes = ns.engine.node_count();
+    let total_edges = ns.engine.graph_store.read().edge_count();
+    let (hot, cold) = ns.engine.temporal_store.read().hot_cold_separation(0.3);
     Json(json!(SystemMetrics {
         total_nodes,
         total_edges,
@@ -240,8 +319,13 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn add_edge(
     State(state): State<AppState>,
+    Path(ns_name): Path<String>,
     Json(req): Json<EdgeReq>,
 ) -> impl IntoResponse {
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
     let edge_type = match req.edge_type.as_str() {
         "similar_to" | "SIMILAR_TO" => EdgeType::SimilarTo,
         "derived_from" | "DERIVED_FROM" => EdgeType::DerivedFrom,
@@ -257,8 +341,7 @@ async fn add_edge(
         edge_type,
         weight: req.weight.unwrap_or(1.0),
     };
-    let engine = state.engine.write().await;
-    let result = engine.graph_store.write().add_edge(edge);
+    let result = ns.engine.graph_store.write().add_edge(edge);
     match result {
         Ok(()) => Json(json!({"ok": true})),
         Err(e) => Json(json!({"error": e.to_string()})),
@@ -267,10 +350,13 @@ async fn add_edge(
 
 async fn get_edges(
     State(state): State<AppState>,
-    Path(id): Path<u64>,
+    Path((ns_name, id)): Path<(String, u64)>,
 ) -> impl IntoResponse {
-    let engine = state.engine.read().await;
-    let graph = engine.graph_store.read();
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
+    let graph = ns.engine.graph_store.read();
     let edges = graph.get_neighbors(id, None);
     let items: Vec<EdgeItem> = edges.iter().map(|(to, et, w)| EdgeItem {
         from: id,
@@ -283,13 +369,17 @@ async fn get_edges(
 
 async fn handle_backup(
     State(state): State<AppState>,
+    Path(ns_name): Path<String>,
     Json(req): Json<SnapshotReq>,
 ) -> impl IntoResponse {
-    let engine = state.engine.read().await;
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
     match req.action.as_str() {
         "create" => {
-            let nodes: Vec<MemoryNode> = engine.node_data.read().values().cloned().collect();
-            match state.backup.create_snapshot(&nodes) {
+            let nodes: Vec<MemoryNode> = ns.engine.node_data.read().values().cloned().collect();
+            match ns.backup.create_snapshot(&nodes) {
                 Ok(snap) => Json(json!({"ok": true, "snapshot_id": snap.snapshot_id})),
                 Err(e) => Json(json!({"error": e.to_string()})),
             }
@@ -299,12 +389,10 @@ async fn handle_backup(
                 Some(s) => s.clone(),
                 None => return Json(json!({"error": "snapshot_id required"})),
             };
-            drop(engine);
-            match state.backup.restore_snapshot(&sid) {
+            match ns.backup.restore_snapshot(&sid) {
                 Ok(nodes) => {
-                    let engine = state.engine.write().await;
                     for node in nodes {
-                        let _ = engine.insert_node(node);
+                        let _ = ns.engine.insert_node(node);
                     }
                     Json(json!({"ok": true}))
                 }
@@ -315,8 +403,15 @@ async fn handle_backup(
     }
 }
 
-async fn list_backups(State(state): State<AppState>) -> impl IntoResponse {
-    match state.backup.list_snapshots() {
+async fn list_backups(
+    State(state): State<AppState>,
+    Path(ns_name): Path<String>,
+) -> impl IntoResponse {
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
+    match ns.backup.list_snapshots() {
         Ok(list) => Json(json!(list)),
         Err(e) => Json(json!({"error": e.to_string()})),
     }
@@ -324,13 +419,18 @@ async fn list_backups(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn handle_import(
     State(state): State<AppState>,
+    Path(ns_name): Path<String>,
     Json(req): Json<ImportReq>,
 ) -> impl IntoResponse {
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
     let path = match &req.path {
         Some(p) => p,
         None => return Json(json!({"error": "path required"})),
     };
-    let dim = state.dimension;
+    let dim = ns.dimension;
     let nodes = match req.format.as_str() {
         "jsonl" => import_export::import_jsonl(path, dim),
         "csv" => import_export::import_csv(path, dim),
@@ -345,9 +445,8 @@ async fn handle_import(
     match nodes {
         Ok(nodes) => {
             let count = nodes.len();
-            let engine = state.engine.write().await;
             for node in nodes {
-                let _ = engine.insert_node(node);
+                let _ = ns.engine.insert_node(node);
             }
             Json(json!({"ok": true, "imported": count}))
         }
@@ -357,14 +456,18 @@ async fn handle_import(
 
 async fn handle_export(
     State(state): State<AppState>,
+    Path(ns_name): Path<String>,
 ) -> impl IntoResponse {
-    let engine = state.engine.read().await;
-    let nodes: Vec<MemoryNode> = engine.node_data.read().values().cloned().collect();
-    let archive = import_export::export_archive(&nodes, state.dimension);
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})).into_response(),
+    };
+    let nodes: Vec<MemoryNode> = ns.engine.node_data.read().values().cloned().collect();
+    let archive = import_export::export_archive(&nodes, ns.dimension);
     let data = serde_json::to_string_pretty(&archive).unwrap_or_default();
     axum::response::Response::builder()
         .header("Content-Type", "application/json")
-        .header("Content-Disposition", "attachment; filename=\"skymemory_export.json\"")
+        .header("Content-Disposition", format!("attachment; filename=\"skymemory_{}_export.json\"", ns_name))
         .body(data)
         .unwrap()
         .into_response()
@@ -379,10 +482,14 @@ struct TraverseReq {
 
 async fn graph_traverse(
     State(state): State<AppState>,
+    Path(ns_name): Path<String>,
     Json(req): Json<TraverseReq>,
 ) -> impl IntoResponse {
-    let engine = state.engine.read().await;
-    let graph = engine.graph_store.read();
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
+    let graph = ns.engine.graph_store.read();
     let et = req.edge_type.as_deref().and_then(|s| match s {
         "similar_to" => Some(EdgeType::SimilarTo),
         "derived_from" => Some(EdgeType::DerivedFrom),
@@ -408,10 +515,14 @@ struct ActivateReq {
 
 async fn spreading_activation(
     State(state): State<AppState>,
+    Path(ns_name): Path<String>,
     Json(req): Json<ActivateReq>,
 ) -> impl IntoResponse {
-    let engine = state.engine.read().await;
-    let graph = engine.graph_store.write();
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
+    let graph = ns.engine.graph_store.write();
     let result = graph.spreading_activation(
         req.start,
         req.decay_factor.unwrap_or(0.5),
@@ -500,9 +611,13 @@ async fn db_test_connection(
 
 async fn db_import_to_vector(
     State(state): State<AppState>,
+    Path(ns_name): Path<String>,
     Json(req): Json<DbImportReq>,
 ) -> impl IntoResponse {
-    // Step 1: Execute the SQL query against the external DB
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
     let query_result = match state.db_manager.query(&req.connection, &req.sql).await {
         Ok(r) => r,
         Err(e) => return Json(json!({"error": format!("query failed: {}", e)})),
@@ -512,13 +627,11 @@ async fn db_import_to_vector(
         return Json(json!({"ok": true, "imported": 0, "message": "query returned no rows"}));
     }
 
-    // Find the vector column index
     let vec_col_idx = match query_result.columns.iter().position(|c| c == &req.vector_column) {
         Some(idx) => idx,
         None => return Json(json!({"error": format!("vector column '{}' not found in query results. available columns: {:?}", req.vector_column, query_result.columns)})),
     };
 
-    // Determine metadata column indices
     let meta_col_indices: Vec<(usize, String)> = match &req.metadata_columns {
         Some(cols) if !cols.is_empty() => {
             cols.iter().filter_map(|name| {
@@ -527,7 +640,6 @@ async fn db_import_to_vector(
             }).collect()
         }
         _ => {
-            // Use all columns except the vector column
             query_result.columns.iter().enumerate()
                 .filter(|(i, _)| *i != vec_col_idx)
                 .map(|(i, name)| (i, name.clone()))
@@ -540,13 +652,11 @@ async fn db_import_to_vector(
         _ => MemoryType::Semantic,
     };
 
-    let engine = state.engine.write().await;
     let mut imported = 0usize;
     let mut errors = Vec::new();
-    let expected_dim = state.dimension;
+    let expected_dim = ns.dimension;
 
     for (row_idx, row) in query_result.rows.iter().enumerate() {
-        // Parse vector from the designated column
         let vector = match parse_vector_value(&row[vec_col_idx]) {
             Some(v) => v,
             None => {
@@ -560,7 +670,6 @@ async fn db_import_to_vector(
             continue;
         }
 
-        // Build metadata from other columns
         let mut properties: Vec<Property> = Vec::new();
         for (col_idx, col_name) in &meta_col_indices {
             if *col_idx < row.len() {
@@ -584,7 +693,7 @@ async fn db_import_to_vector(
             memory_type: mem_type,
         };
 
-        match engine.insert_node(node) {
+        match ns.engine.insert_node(node) {
             Ok(()) => imported += 1,
             Err(e) => errors.push(format!("row {}: insert failed: {}", row_idx, e)),
         }
@@ -597,11 +706,6 @@ async fn db_import_to_vector(
     Json(resp)
 }
 
-/// Parse a JSON value into a Vec<f32> vector.
-/// Supports:
-/// - JSON array of numbers: [0.1, 0.2, 0.3]
-/// - String of comma-separated numbers: "0.1,0.2,0.3"
-/// - String of JSON array: "[0.1, 0.2, 0.3]"
 fn parse_vector_value(val: &serde_json::Value) -> Option<Vec<f32>> {
     match val {
         serde_json::Value::Array(arr) => {
@@ -610,13 +714,11 @@ fn parse_vector_value(val: &serde_json::Value) -> Option<Vec<f32>> {
         }
         serde_json::Value::String(s) => {
             let s = s.trim();
-            // Try JSON array first
             if s.starts_with('[') {
                 if let Ok(arr) = serde_json::from_str::<Vec<f32>>(s) {
                     return Some(arr);
                 }
             }
-            // Try comma-separated
             let v: Vec<f32> = s.split(',')
                 .map(|x| x.trim().parse::<f32>())
                 .collect::<Result<Vec<_>, _>>()
