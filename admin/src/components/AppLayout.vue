@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { useRouter, useRoute } from 'vue-router'
 import { useToast } from '../composables/useToast'
+import { setLocale, type Locale } from '../i18n'
 
 const store = useAppStore()
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
+const { t, locale } = useI18n()
 
 const nsDropdownOpen = ref(false)
 const showCreateNs = ref(false)
@@ -19,14 +22,15 @@ onMounted(async () => {
   store.fetchInfo()
 })
 
-const navItems = [
-  { path: '/dashboard', label: 'Overview', icon: 'chart-line' },
-  { path: '/memories', label: 'Memories', icon: 'brain' },
-  { path: '/graph', label: 'Graph', icon: 'diagram-project' },
-  { path: '/query', label: 'Query', icon: 'magnifying-glass' },
-  { path: '/database', label: 'Import', icon: 'database' },
-  { path: '/backup', label: 'Backups', icon: 'floppy-disk' },
-]
+const navItems = computed(() => [
+  { path: '/dashboard', label: t('nav.overview'), icon: 'chart-line' },
+  { path: '/memories', label: t('nav.memories'), icon: 'brain' },
+  { path: '/graph', label: t('nav.graph'), icon: 'diagram-project' },
+  { path: '/query', label: t('nav.query'), icon: 'magnifying-glass' },
+  { path: '/import', label: t('nav.importData'), icon: 'upload' },
+  { path: '/database', label: t('nav.externalDb'), icon: 'database' },
+  { path: '/backup', label: t('nav.backups'), icon: 'floppy-disk' },
+])
 
 function isActive(path: string) {
   return route.path === path
@@ -46,7 +50,7 @@ async function handleCreateNs() {
   if (!newNsName.value.trim()) return
   try {
     await store.createNs(newNsName.value.trim(), newNsDim.value)
-    toast.success(`Namespace "${newNsName.value.trim()}" created`)
+    toast.success(t('ns.created', { name: newNsName.value.trim() }))
     newNsName.value = ''
     newNsDim.value = undefined
     showCreateNs.value = false
@@ -57,16 +61,21 @@ async function handleCreateNs() {
 
 async function handleDeleteNs(name: string) {
   if (name === 'default') {
-    toast.error('Cannot delete the default namespace')
+    toast.error(t('ns.cannotDeleteDefault'))
     return
   }
   try {
     await store.deleteNs(name)
-    toast.success(`Namespace "${name}" deleted`)
+    toast.success(t('ns.deleted', { name }))
     store.fetchInfo()
   } catch (e: any) {
     toast.error(e.response?.data?.error ?? e.message)
   }
+}
+
+function toggleLocale() {
+  const next: Locale = locale.value === 'en' ? 'zh' : 'en'
+  setLocale(next)
 }
 
 function closeDropdown(e: MouseEvent) {
@@ -118,7 +127,7 @@ function closeDropdown(e: MouseEvent) {
     <main class="flex-1 flex flex-col min-w-0">
       <header class="h-14 flex items-center justify-between px-6 border-b border-border-color bg-bg-secondary">
         <div class="flex items-center gap-4">
-          <h1 class="text-sm font-semibold m-0 uppercase tracking-wider text-text-secondary">{{ route.name }}</h1>
+          <h1 class="text-sm font-semibold m-0 uppercase tracking-wider text-text-secondary">{{ t('nav.' + String(route.name)) }}</h1>
 
           <div class="ns-dropdown relative">
             <button
@@ -135,7 +144,7 @@ function closeDropdown(e: MouseEvent) {
               class="absolute top-full left-0 mt-1 w-56 bg-bg-elevated border border-border-color rounded-lg shadow-xl z-50 py-1"
               @click.stop
             >
-              <div class="px-3 py-2 text-[10px] uppercase tracking-widest text-text-muted font-semibold">Namespaces</div>
+              <div class="px-3 py-2 text-[10px] uppercase tracking-widest text-text-muted font-semibold">{{ t('ns.namespaces') }}</div>
               <button
                 v-for="ns in store.namespaces"
                 :key="ns.name"
@@ -148,7 +157,7 @@ function closeDropdown(e: MouseEvent) {
                   <span class="font-medium">{{ ns.name }}</span>
                 </div>
                 <div class="flex items-center gap-2">
-                  <span class="text-[11px] text-text-muted">{{ ns.node_count }} nodes</span>
+                  <span class="text-[11px] text-text-muted">{{ ns.node_count }} {{ t('ns.nodes') }}</span>
                   <button
                     v-if="ns.name !== 'default'"
                     class="w-5 h-5 flex items-center justify-center bg-transparent border-none text-text-muted rounded cursor-pointer hover:text-red-400 hover:bg-red-950/50 transition-all"
@@ -166,12 +175,12 @@ function closeDropdown(e: MouseEvent) {
                   @click="showCreateNs = true"
                 >
                   <font-awesome-icon icon="plus" class="w-3" />
-                  <span>New namespace</span>
+                  <span>{{ t('ns.newNamespace') }}</span>
                 </button>
                 <div v-else class="px-3 py-2 flex flex-col gap-2">
                   <input
                     v-model="newNsName"
-                    placeholder="namespace name"
+                    :placeholder="t('ns.newNamespace')"
                     class="w-full px-2.5 py-1.5 bg-bg-primary border border-border-color rounded text-xs text-text-primary outline-none focus:border-accent-primary font-mono"
                     @keyup.enter="handleCreateNs"
                   />
@@ -187,13 +196,13 @@ function closeDropdown(e: MouseEvent) {
                       class="flex-1 px-2 py-1.5 bg-accent-primary border-none rounded text-xs font-medium text-white cursor-pointer hover:opacity-90"
                       @click="handleCreateNs"
                     >
-                      Create
+                      {{ t('ns.create') }}
                     </button>
                     <button
                       class="px-2 py-1.5 bg-bg-tertiary border border-border-color rounded text-xs text-text-muted cursor-pointer hover:text-text-primary"
                       @click="showCreateNs = false; newNsName = ''; newNsDim = undefined"
                     >
-                      Cancel
+                      {{ t('ns.cancel') }}
                     </button>
                   </div>
                 </div>
@@ -203,6 +212,14 @@ function closeDropdown(e: MouseEvent) {
         </div>
 
         <div class="flex items-center gap-3">
+          <button
+            class="flex items-center gap-1.5 px-2 py-1 border-none bg-transparent text-text-muted rounded-md cursor-pointer text-xs transition-all duration-150 hover:bg-bg-tertiary hover:text-text-primary"
+            @click="toggleLocale"
+            :title="locale === 'en' ? '切换中文' : 'Switch to English'"
+          >
+            <font-awesome-icon icon="globe" class="w-3.5" />
+            <span class="font-medium uppercase">{{ locale === 'en' ? '中文' : 'EN' }}</span>
+          </button>
           <button
             class="flex items-center justify-center w-8 h-8 border-none bg-transparent text-text-muted rounded-md cursor-pointer transition-all duration-150 hover:bg-bg-tertiary hover:text-text-primary"
             @click="store.toggleTheme"
@@ -233,20 +250,20 @@ function closeDropdown(e: MouseEvent) {
     </main>
     <div class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
       <div
-        v-for="t in toast.toasts"
-        :key="t.id"
+        v-for="nt in toast.toasts"
+        :key="nt.id"
         class="pointer-events-auto flex items-center gap-2.5 px-4 py-3 rounded-lg border text-[13px] font-medium shadow-lg max-w-sm animate-[slideIn_0.25s_ease-out]"
         :class="{
-          'bg-green-950/90 border-green-800/50 text-green-300': t.type === 'success',
-          'bg-red-950/90 border-red-800/50 text-red-300': t.type === 'error',
-          'bg-orange-950/90 border-orange-800/50 text-orange-300': t.type === 'info',
+          'bg-green-950/90 border-green-800/50 text-green-300': nt.type === 'success',
+          'bg-red-950/90 border-red-800/50 text-red-300': nt.type === 'error',
+          'bg-orange-950/90 border-orange-800/50 text-orange-300': nt.type === 'info',
         }"
-        @click="toast.remove(t.id)"
+        @click="toast.remove(nt.id)"
       >
-        <font-awesome-icon v-if="t.type === 'success'" icon="check" class="w-3.5" />
-        <font-awesome-icon v-else-if="t.type === 'error'" icon="xmark" class="w-3.5" />
+        <font-awesome-icon v-if="nt.type === 'success'" icon="check" class="w-3.5" />
+        <font-awesome-icon v-else-if="nt.type === 'error'" icon="xmark" class="w-3.5" />
         <font-awesome-icon v-else icon="info-circle" class="w-3.5" />
-        <span>{{ t.message }}</span>
+        <span>{{ nt.message }}</span>
       </div>
     </div>
   </div>

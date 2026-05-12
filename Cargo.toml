@@ -11,6 +11,7 @@ members = [
     "crates/import_export",
     "crates/backup",
     "crates/database",
+    "crates/embedding",
 ]
 resolver = "2"
 
@@ -35,6 +36,7 @@ skymemory-api = { path = "crates/api" }
 skymemory-import-export = { path = "crates/import_export" }
 skymemory-backup = { path = "crates/backup" }
 skymemory-database = { path = "crates/database" }
+skymemory-embedding = { path = "crates/embedding" }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 axum = "0.7"

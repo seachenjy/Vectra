@@ -9,6 +9,20 @@ pub struct CreateMemoryReq {
 }
 
 #[derive(Deserialize)]
+pub struct ImportTextReq {
+    pub text: String,
+    #[serde(default = "default_true")]
+    pub chunk: bool,
+    pub chunk_size: Option<usize>,
+    pub chunk_overlap: Option<usize>,
+    pub memory_type: Option<String>,
+    pub metadata: Option<HashMap<String, String>>,
+}
+
+fn default_true() -> bool { true }
+
+
+#[derive(Deserialize)]
 pub struct SearchReq {
     pub vector: Vec<f32>,
     pub k: Option<usize>,

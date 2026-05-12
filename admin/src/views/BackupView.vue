@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useApi } from '../composables/useApi'
 import { useToast } from '../composables/useToast'
 import { useAppStore } from '../stores/app'
 
+const { t } = useI18n()
 const api = useApi()
 const toast = useToast()
 const store = useAppStore()
@@ -38,7 +40,7 @@ async function createBackup() {
   try {
     const result = await api.handleBackup(store.currentNs, 'create')
     if (result.ok) {
-      toast.success(`Backup created: ${result.snapshot_id}`)
+      toast.success(t('backup.backupCreated', { id: result.snapshot_id }))
       await loadBackups()
     } else {
       toast.error(result.error)
@@ -51,12 +53,12 @@ async function createBackup() {
 }
 
 async function restoreBackup(snapshotId: string) {
-  if (!confirm(`Restore backup ${snapshotId}? Current data will be overwritten.`)) return
+  if (!confirm(t('backup.confirmRestore', { id: snapshotId }))) return
   restoring.value.add(snapshotId)
   try {
     const result = await api.handleBackup(store.currentNs, 'restore', snapshotId)
     if (result.ok) {
-      toast.success('Backup restored')
+      toast.success(t('backup.backupRestored'))
       await Promise.all([loadBackups(), store.fetchInfo(), store.fetchMetrics()])
     } else {
       toast.error(result.error)
@@ -70,14 +72,14 @@ async function restoreBackup(snapshotId: string) {
 
 async function doImport() {
   if (!importPath.value.trim()) {
-    toast.error('Enter a file path')
+    toast.error(t('backup.enterFilePath'))
     return
   }
   importing.value = true
   try {
     const result = await api.handleImport(store.currentNs, { format: importFormat.value, path: importPath.value })
     if (result.ok) {
-      toast.success(`Imported ${result.imported} memories`)
+      toast.success(t('backup.importedCount', { count: result.imported }))
     } else {
       toast.error(result.error)
     }
@@ -99,7 +101,7 @@ async function doExport() {
     a.download = `skymemory_export_${ts}.json`
     a.click()
     URL.revokeObjectURL(url)
-    toast.success('Export complete')
+    toast.success(t('backup.exportComplete'))
   } catch (e: any) {
     toast.error(e.message)
   } finally {
@@ -110,32 +112,32 @@ async function doExport() {
 function formatSnapshotId(id: string): string {
   const ts = id.replace('snap_', '')
   const num = parseInt(ts)
-  if (!isNaN(num)) return new Date(num).toLocaleString('zh-CN')
+  if (!isNaN(num)) return new Date(num).toLocaleString()
   return id
 }
 
-const actions = [
+const actions = computed(() => [
   {
     key: 'backup',
-    title: 'Create Backup',
-    desc: 'Save all memory nodes as a snapshot',
+    title: t('backup.createBackup'),
+    desc: t('backup.createBackupDesc'),
     icon: 'floppy-disk',
-    btnText: 'Create Snapshot',
+    btnText: t('backup.createSnapshot'),
     btnStyle: 'primary',
     loading: creating,
     handler: createBackup,
   },
   {
     key: 'export',
-    title: 'Export Data',
-    desc: 'Export all memories as SkyArchive JSON',
+    title: t('backup.exportData'),
+    desc: t('backup.exportDataDesc'),
     icon: 'file-export',
-    btnText: 'Download Export',
+    btnText: t('backup.downloadExport'),
     btnStyle: 'secondary',
     loading: exporting,
     handler: doExport,
   },
-]
+])
 </script>
 
 <template>
@@ -161,20 +163,20 @@ const actions = [
         >
           <font-awesome-icon v-if="action.loading.value" icon="circle-notch" class="w-3.5 animate-spin" />
           <font-awesome-icon v-else :icon="action.icon" class="w-3.5" />
-          {{ action.loading.value ? 'Processing...' : action.btnText }}
+          {{ action.loading.value ? t('backup.processing') : action.btnText }}
         </button>
       </div>
 
       <div class="bg-bg-secondary border border-border-color rounded-xl p-5">
         <div class="flex items-center gap-2 mb-1.5">
           <font-awesome-icon icon="file-import" class="w-3.5 text-accent-primary" />
-          <h3 class="m-0 text-sm font-semibold">Import Data</h3>
+          <h3 class="m-0 text-sm font-semibold">{{ t('backup.importData') }}</h3>
         </div>
-        <p class="text-text-muted text-xs m-0 mb-4">Import memories from file</p>
+        <p class="text-text-muted text-xs m-0 mb-4">{{ t('backup.importDataDesc') }}</p>
         <div class="flex flex-col gap-2">
           <input
             v-model="importPath"
-            placeholder="File path"
+            :placeholder="t('backup.filePath')"
             class="w-full bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-[13px] outline-none transition-all duration-150 focus:border-accent-primary placeholder:text-text-muted"
           />
           <div class="flex gap-2">
@@ -193,7 +195,7 @@ const actions = [
             >
               <font-awesome-icon v-if="importing" icon="circle-notch" class="w-3.5 animate-spin" />
               <font-awesome-icon v-else icon="file-import" class="w-3.5" />
-              {{ importing ? 'Importing...' : 'Import' }}
+              {{ importing ? t('backup.importing') : t('backup.importButton') }}
             </button>
           </div>
         </div>
@@ -203,11 +205,11 @@ const actions = [
     <div class="bg-bg-secondary border border-border-color rounded-xl p-5">
       <div class="flex items-center gap-2 mb-4">
         <font-awesome-icon icon="history" class="w-3.5 text-text-muted" />
-        <h3 class="m-0 text-sm font-semibold">Snapshots</h3>
+        <h3 class="m-0 text-sm font-semibold">{{ t('backup.snapshots') }}</h3>
         <span class="px-1.5 py-0.5 bg-bg-tertiary rounded text-[10px] font-mono text-text-muted">{{ backups.length }}</span>
       </div>
       <div v-if="backups.length === 0" class="text-text-muted text-xs text-center py-8">
-        No backups yet
+        {{ t('backup.noBackups') }}
       </div>
       <div v-for="snap in backups" :key="snap" class="flex justify-between items-center py-3 border-b border-border-color last:border-0">
         <div class="flex flex-col gap-0.5">
@@ -221,7 +223,7 @@ const actions = [
         >
           <font-awesome-icon v-if="restoring.has(snap)" icon="circle-notch" class="w-3 animate-spin" />
           <font-awesome-icon v-else icon="rotate" class="w-3" />
-          {{ restoring.has(snap) ? 'Restoring...' : 'Restore' }}
+          {{ restoring.has(snap) ? t('backup.restoring') : t('backup.restore') }}
         </button>
       </div>
     </div>

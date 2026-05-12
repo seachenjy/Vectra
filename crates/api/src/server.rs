@@ -19,17 +19,25 @@ use crate::types::*;
 struct AppStateInner {
     namespaces: NamespaceManager,
     db_manager: DatabaseManager,
+    embedding: skymemory_embedding::EmbeddingEngine,
     default_dimension: usize,
 }
 
 type AppState = Arc<AppStateInner>;
 
-pub async fn build_router(namespaces: NamespaceManager, dimension: usize) -> Router {
+pub async fn build_router(namespaces: NamespaceManager, dimension: usize, models_dir: std::path::PathBuf, hf_mirror: Option<String>) -> Router {
     namespaces.initialize().await.expect("failed to initialize namespaces");
+
+    let embedding = skymemory_embedding::EmbeddingEngine::new(&models_dir, hf_mirror.as_deref())
+        .unwrap_or_else(|e| {
+            tracing::warn!("embedding engine init failed (models not available): {}", e);
+            skymemory_embedding::EmbeddingEngine::new_unavailable()
+        });
 
     let state: AppState = Arc::new(AppStateInner {
         namespaces,
         db_manager: DatabaseManager::new(),
+        embedding,
         default_dimension: dimension,
     });
 
@@ -59,6 +67,9 @@ pub async fn build_router(namespaces: NamespaceManager, dimension: usize) -> Rou
         .route("/api/ns/:ns/export", post(handle_export))
         .route("/api/ns/:ns/graph/traverse", post(graph_traverse))
         .route("/api/ns/:ns/graph/activate", post(spreading_activation))
+        .route("/api/ns/:ns/import/text", post(import_text))
+        .route("/api/ns/:ns/import/image", post(import_image))
+        .route("/api/ns/:ns/embedding/status", get(embedding_status))
         .route("/api/db/connect", post(db_connect))
         .route("/api/db/disconnect", post(db_disconnect))
         .route("/api/db/connections", get(db_list_connections))
@@ -735,4 +746,133 @@ fn json_value_to_string(val: &serde_json::Value) -> String {
         serde_json::Value::Null => String::new(),
         other => other.to_string(),
     }
+}
+
+// ── Embedding handlers ──────────────────────────────────────
+
+async fn import_text(
+    State(state): State<AppState>,
+    Path(ns_name): Path<String>,
+    Json(req): Json<ImportTextReq>,
+) -> impl IntoResponse {
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
+
+    let mem_type = match req.memory_type.as_deref() {
+        Some("episodic") => MemoryType::Episodic,
+        _ => MemoryType::Semantic,
+    };
+
+    let base_metadata = req.metadata.unwrap_or_default();
+
+    let chunks = if req.chunk {
+        let config = skymemory_embedding::chunker::ChunkConfig {
+            max_chars: req.chunk_size.unwrap_or(512),
+            overlap: req.chunk_overlap.unwrap_or(50),
+        };
+        skymemory_embedding::chunker::chunk_text(&req.text, &config)
+    } else {
+        vec![skymemory_embedding::chunker::Chunk { text: req.text.clone(), index: 0 }]
+    };
+
+    if chunks.is_empty() {
+        return Json(json!({"error": "no text content to import"}));
+    }
+
+    let mut imported = 0usize;
+    let mut errors = Vec::new();
+
+    for chunk in &chunks {
+        match state.embedding.embed_text(&chunk.text) {
+            Ok(vector) => {
+                if let Some(dim) = state.embedding.text_dimension() {
+                    if ns.dimension != dim {
+                        errors.push(format!("chunk {}: embedding dimension {} != namespace dimension {}", chunk.index, dim, ns.dimension));
+                        continue;
+                    }
+                }
+                let mut properties: Vec<Property> = base_metadata.iter().map(|(k, v)| Property {
+                    key: k.clone(),
+                    value: Value::String(v.clone()),
+                }).collect();
+                properties.push(Property {
+                    key: "chunk_index".into(),
+                    value: Value::String(chunk.index.to_string()),
+                });
+                properties.push(Property {
+                    key: "source".into(),
+                    value: Value::String("text_import".into()),
+                });
+
+                let node = MemoryNode {
+                    id: generate_node_id(),
+                    vector,
+                    properties,
+                    temporal: TemporalInfo::default(),
+                    memory_type: mem_type,
+                };
+                match ns.engine.insert_node(node) {
+                    Ok(()) => imported += 1,
+                    Err(e) => errors.push(format!("chunk {}: insert failed: {}", chunk.index, e)),
+                }
+            }
+            Err(e) => {
+                errors.push(format!("chunk {}: embedding failed: {}", chunk.index, e));
+            }
+        }
+    }
+
+    let mut resp = json!({"ok": true, "imported": imported, "chunks": chunks.len()});
+    if !errors.is_empty() {
+        resp["errors"] = json!(errors);
+    }
+    Json(resp)
+}
+
+async fn import_image(
+    State(state): State<AppState>,
+    Path(ns_name): Path<String>,
+    body: axum::body::Bytes,
+) -> impl IntoResponse {
+    let ns = match state.namespaces.get_namespace(&ns_name).await {
+        Some(ns) => ns,
+        None => return Json(json!({"error": format!("namespace '{}' not found", ns_name)})),
+    };
+
+    match state.embedding.embed_image(&body) {
+        Ok(vector) => {
+            if let Some(dim) = state.embedding.image_dimension() {
+                if ns.dimension != dim {
+                    return Json(json!({"error": format!("embedding dimension {} != namespace dimension {}", dim, ns.dimension)}));
+                }
+            }
+            let mut properties: Vec<Property> = Vec::new();
+            properties.push(Property {
+                key: "source".into(),
+                value: Value::String("image_import".into()),
+            });
+
+            let node = MemoryNode {
+                id: generate_node_id(),
+                vector,
+                properties,
+                temporal: TemporalInfo::default(),
+                memory_type: MemoryType::Semantic,
+            };
+            let id = node.id;
+            match ns.engine.insert_node(node) {
+                Ok(()) => Json(json!({"ok": true, "id": id})),
+                Err(e) => Json(json!({"error": e.to_string()})),
+            }
+        }
+        Err(e) => Json(json!({"error": format!("image embedding failed: {}", e)})),
+    }
+}
+
+async fn embedding_status(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    Json(json!(state.embedding.model_info()))
 }

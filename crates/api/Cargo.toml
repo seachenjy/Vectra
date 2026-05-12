@@ -14,6 +14,7 @@ skymemory-storage = { path = "../storage" }
 skymemory-backup = { path = "../backup" }
 skymemory-import-export = { path = "../import_export" }
 skymemory-database = { path = "../database" }
+skymemory-embedding = { path = "../embedding" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 axum = { version = "0.7", features = ["ws"] }

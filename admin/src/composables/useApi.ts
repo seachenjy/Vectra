@@ -261,6 +261,42 @@ export function useApi() {
     return data
   }
 
+  // ── Embedding API ─────────────────────────────────────────
+
+  interface EmbeddingStatus {
+    text_model: string | null
+    image_model: string | null
+    text_ready: boolean
+    image_ready: boolean
+    text_dimension: number
+    image_dimension: number
+  }
+
+  async function importText(ns: string, payload: {
+    text: string
+    chunk?: boolean
+    chunk_size?: number
+    chunk_overlap?: number
+    memory_type?: string
+    metadata?: Record<string, string>
+  }): Promise<{ ok: boolean; imported: number; chunks: number; errors?: string[]; error?: string }> {
+    const { data } = await client.post(`/api/ns/${ns}/import/text`, payload, { timeout: 120000 })
+    return data
+  }
+
+  async function importImage(ns: string, file: File): Promise<{ ok: boolean; id?: number; error?: string }> {
+    const { data } = await client.post(`/api/ns/${ns}/import/image`, file, {
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      timeout: 120000,
+    })
+    return data
+  }
+
+  async function embeddingStatus(): Promise<EmbeddingStatus> {
+    const { data } = await client.get('/api/ns/default/embedding/status')
+    return data
+  }
+
   return {
     listNamespaces,
     createNamespace,
@@ -290,5 +326,8 @@ export function useApi() {
     dbDescribeTable,
     dbTestConnection,
     dbImportToVector,
+    importText,
+    importImage,
+    embeddingStatus,
   }
 }

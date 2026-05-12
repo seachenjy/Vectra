@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useApi } from '../composables/useApi'
 import { useToast } from '../composables/useToast'
 import { useAppStore } from '../stores/app'
 
+const { t } = useI18n()
 const api = useApi()
 const toast = useToast()
 const store = useAppStore()
@@ -18,20 +20,23 @@ const activating = ref(false)
 
 const nodePositions = ref<Record<number, { x: number; y: number }>>({})
 
-const edgeTypes = [
-  { value: '', label: 'All Types' },
+const edgeTypes = computed(() => [
+  { value: '', label: t('graph.allEdgeTypes') },
   { value: 'similar_to', label: 'SimilarTo' },
   { value: 'derived_from', label: 'DerivedFrom' },
   { value: 'part_of', label: 'PartOf' },
   { value: 'temporally_after', label: 'TemporallyAfter' },
   { value: 'contradicts', label: 'Contradicts' },
   { value: 'references', label: 'References' },
-]
+])
 
 const loading = computed(() => traversing.value || activating.value)
 
 async function doTraverse() {
-  if (startId.value === null) return
+  if (startId.value === null) {
+    toast.error(t('graph.enterStartId'))
+    return
+  }
   traversing.value = true
   try {
     const result = await api.graphTraverse(store.currentNs, {
@@ -46,7 +51,7 @@ async function doTraverse() {
       result.map(node => api.getEdges(store.currentNs, node.id).catch(() => []))
     )
     edges.value = edgeLists.flat()
-    toast.info(`Traversed ${result.length} nodes, ${edges.value.length} edges`)
+    toast.info(t('graph.traversed', { nodes: result.length, edges: edges.value.length }))
   } catch (e: any) {
     toast.error(e.message)
   } finally {
@@ -55,7 +60,10 @@ async function doTraverse() {
 }
 
 async function doActivate() {
-  if (startId.value === null) return
+  if (startId.value === null) {
+    toast.error(t('graph.enterStartId'))
+    return
+  }
   activating.value = true
   try {
     activation.value = await api.spreadingActivation(store.currentNs, {
@@ -64,7 +72,7 @@ async function doActivate() {
       threshold: 0.1,
       max_hops: 3,
     })
-    toast.info(`Activation complete: ${activation.value.length} nodes`)
+    toast.info(t('graph.activationComplete', { count: activation.value.length }))
   } catch (e: any) {
     toast.error(e.message)
   } finally {
@@ -138,7 +146,7 @@ const legendItems = [
           <input
             v-model.number="startId"
             type="number"
-            placeholder="Start Node ID"
+            :placeholder="t('graph.startNodeId')"
             class="w-36 bg-bg-primary border border-border-color rounded-lg pl-8 pr-3 py-2 text-text-primary text-[13px] outline-none transition-all duration-150 focus:border-accent-primary placeholder:text-text-muted"
           />
         </div>
@@ -147,7 +155,7 @@ const legendItems = [
           type="number"
           min="1"
           max="5"
-          placeholder="Depth"
+          :placeholder="t('graph.traversalDepth')"
           class="w-20 bg-bg-primary border border-border-color rounded-lg px-3 py-2 text-text-primary text-[13px] outline-none transition-all duration-150 focus:border-accent-primary placeholder:text-text-muted"
         />
         <select
@@ -165,7 +173,7 @@ const legendItems = [
         >
           <font-awesome-icon v-if="traversing" icon="circle-notch" class="w-3.5 animate-spin" />
           <font-awesome-icon v-else icon="diagram-project" class="w-3.5" />
-          {{ traversing ? 'Traversing...' : 'Traverse' }}
+          {{ traversing ? t('graph.traversing') : t('graph.traverse') }}
         </button>
         <button
           class="flex items-center gap-2 px-3 py-2 border border-border-color rounded-lg text-[13px] font-medium cursor-pointer transition-all duration-150 bg-bg-tertiary text-text-secondary hover:border-border-hover hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
@@ -174,7 +182,7 @@ const legendItems = [
         >
           <font-awesome-icon v-if="activating" icon="circle-notch" class="w-3.5 animate-spin" />
           <font-awesome-icon v-else icon="wave-square" class="w-3.5" />
-          {{ activating ? 'Activating...' : 'Activate' }}
+          {{ activating ? t('graph.activating') : t('graph.activateButton') }}
         </button>
       </div>
     </div>
@@ -218,14 +226,14 @@ const legendItems = [
       </div>
 
       <div v-if="nodes.length > 0" class="w-[220px] flex-shrink-0 bg-bg-secondary border border-border-color rounded-xl p-4">
-        <h3 class="m-0 mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">Legend</h3>
+        <h3 class="m-0 mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">{{ t('graph.legend') }}</h3>
         <div v-for="item in legendItems" :key="item.label" class="flex items-center gap-2.5 py-1.5">
           <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: item.color }"></span>
           <span class="text-xs text-text-secondary">{{ item.label }}</span>
         </div>
 
         <div v-if="activation.length > 0" class="mt-4 border-t border-border-color pt-3">
-          <h3 class="m-0 mb-2 text-xs font-semibold uppercase tracking-wider text-text-muted">Activation</h3>
+          <h3 class="m-0 mb-2 text-xs font-semibold uppercase tracking-wider text-text-muted">{{ t('graph.activation') }}</h3>
           <div v-for="act in activation.slice(0, 10)" :key="act.id" class="flex items-center gap-2 py-1">
             <span class="font-mono text-[10px] text-accent-primary min-w-[40px]">#{{ act.id }}</span>
             <div class="flex-1 h-1.5 bg-bg-tertiary rounded-full overflow-hidden">

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useApi } from '../composables/useApi'
 import { useToast } from '../composables/useToast'
 import { useAppStore } from '../stores/app'
 
+const { t } = useI18n()
 const api = useApi()
 const toast = useToast()
 const store = useAppStore()
@@ -15,14 +17,14 @@ const results = ref<any[]>([])
 const loading = ref(false)
 const queryHistory = ref<string[]>(loadHistory())
 
-const examples = [
-  { label: 'Recent memories', query: 'BOOST recent', icon: 'clock-rotate-left' },
-  { label: 'Semantic search', query: 'VECTOR_SIMILAR("text")', icon: 'magnifying-glass' },
-  { label: 'Property filter', query: 'category = technology', icon: 'filter' },
-  { label: 'Combined query', query: 'VECTOR_SIMILAR("memory") AND category = important BOOST recent 2.0', icon: 'code' },
-  { label: 'Graph expansion', query: 'EXPAND depth=2', icon: 'diagram-project' },
-  { label: 'OR query', query: 'VECTOR_SIMILAR("test") OR category = demo', icon: 'code-branch' },
-]
+const examples = computed(() => [
+  { label: t('query.exampleRecent'), query: 'BOOST recent', icon: 'clock-rotate-left' },
+  { label: t('query.exampleSemantic'), query: 'VECTOR_SIMILAR("text")', icon: 'magnifying-glass' },
+  { label: t('query.exampleFilter'), query: 'category = technology', icon: 'filter' },
+  { label: t('query.exampleCombined'), query: 'VECTOR_SIMILAR("memory") AND category = important BOOST recent 2.0', icon: 'code' },
+  { label: t('query.exampleExpand'), query: 'EXPAND depth=2', icon: 'diagram-project' },
+  { label: t('query.exampleOr'), query: 'VECTOR_SIMILAR("test") OR category = demo', icon: 'code-branch' },
+])
 
 function loadHistory(): string[] {
   try {
@@ -39,7 +41,7 @@ function saveHistory(history: string[]) {
 
 async function doQuery() {
   if (!queryText.value.trim()) {
-    toast.error('Enter a query')
+    toast.error(t('query.enterQuery'))
     return
   }
   loading.value = true
@@ -54,7 +56,7 @@ async function doQuery() {
       if (queryHistory.value.length > 20) queryHistory.value.pop()
       saveHistory(queryHistory.value)
     }
-    toast.info(`Query complete: ${results.value.length} results`)
+    toast.info(t('query.queryComplete', { count: results.value.length }))
   } catch (e: any) {
     toast.error(e.message)
   } finally {
@@ -73,7 +75,7 @@ function loadFromHistory(query: string) {
 function clearHistory() {
   queryHistory.value = []
   localStorage.removeItem('skymemory_query_history')
-  toast.info('History cleared')
+  toast.info(t('query.historyCleared'))
 }
 </script>
 
@@ -83,7 +85,7 @@ function clearHistory() {
       <div class="flex justify-between items-center px-5 py-3 border-b border-border-color">
         <div class="flex items-center gap-2">
           <font-awesome-icon icon="code" class="w-3.5 text-accent-primary" />
-          <h3 class="m-0 text-sm font-semibold">Semantic Query</h3>
+          <h3 class="m-0 text-sm font-semibold">{{ t('query.semanticQuery') }}</h3>
         </div>
         <div class="flex gap-1.5 flex-wrap">
           <span v-for="tag in ['VECTOR_SIMILAR', 'key = value', 'AND / OR', 'BOOST', 'EXPAND']" :key="tag"
@@ -95,7 +97,7 @@ function clearHistory() {
       <div class="p-4">
         <textarea
           v-model="queryText"
-          placeholder="Enter query expression..."
+          :placeholder="t('query.queryPlaceholder')"
           class="w-full bg-bg-primary border border-border-color rounded-lg px-4 py-3 text-text-primary text-[13px] font-mono resize-y outline-none leading-6 transition-all duration-150 focus:border-accent-primary placeholder:text-text-muted"
           rows="4"
           @keydown.ctrl.enter="doQuery"
@@ -127,8 +129,8 @@ function clearHistory() {
         >
           <font-awesome-icon v-if="loading" icon="circle-notch" class="w-3.5 animate-spin" />
           <font-awesome-icon v-else icon="magnifying-glass" class="w-3.5" />
-          {{ loading ? 'Executing...' : 'Execute' }}
-          <span class="text-[11px] opacity-60 ml-1">Ctrl+Enter</span>
+          {{ loading ? t('query.executing') : t('query.executeButton') }}
+          <span class="text-[11px] opacity-60 ml-1">{{ t('query.enterShortcut') }}</span>
         </button>
       </div>
     </div>
@@ -136,20 +138,20 @@ function clearHistory() {
     <div class="flex gap-4 min-h-[400px]">
       <div class="flex-1 flex flex-col gap-2">
         <div class="flex items-center gap-2 mb-1">
-          <span class="text-xs font-semibold uppercase tracking-wider text-text-muted">Results</span>
+          <span class="text-xs font-semibold uppercase tracking-wider text-text-muted">{{ t('query.results') }}</span>
           <span class="px-1.5 py-0.5 bg-bg-tertiary rounded text-[10px] font-mono text-text-muted">{{ results.length }}</span>
         </div>
         <div v-if="results.length === 0 && !loading" class="text-text-muted text-center py-20 text-sm">
-          Execute a query to see results
+          {{ t('query.noResults') }}
         </div>
         <div v-for="(item, i) in results" :key="i" class="bg-bg-secondary border border-border-color rounded-lg px-4 py-3 transition-all duration-150 hover:border-border-hover">
           <div class="flex items-center gap-2.5 mb-2">
             <span class="font-mono text-xs font-medium text-accent-primary">#{{ i + 1 }}</span>
             <span class="font-mono text-[11px] text-text-muted">ID: {{ item.id }}</span>
-            <span class="font-mono text-[11px] text-green-500">score: {{ item.score?.toFixed(4) ?? '-' }}</span>
+            <span class="font-mono text-[11px] text-green-500">{{ t('query.score') }}: {{ item.score?.toFixed(4) ?? '-' }}</span>
             <span v-if="item.expanded_from" class="flex items-center gap-1 text-[10px] text-yellow-500 px-1.5 py-0.5 bg-yellow-950/30 border border-yellow-800/20 rounded">
               <font-awesome-icon icon="arrow-up-right-from-square" class="w-2.5" />
-              from #{{ item.expanded_from }}
+              {{ t('query.expandedFrom', { id: item.expanded_from }) }}
             </span>
           </div>
           <div v-if="item.metadata" class="flex flex-wrap gap-1 mb-1.5">
@@ -172,7 +174,7 @@ function clearHistory() {
         <div class="bg-bg-secondary border border-border-color rounded-xl p-4">
           <div class="flex items-center gap-2 mb-3">
             <font-awesome-icon icon="clipboard" class="w-3 text-text-muted" />
-            <h3 class="m-0 text-xs font-semibold uppercase tracking-wider text-text-muted">Examples</h3>
+            <h3 class="m-0 text-xs font-semibold uppercase tracking-wider text-text-muted">{{ t('query.queryExamples') }}</h3>
           </div>
           <button
             v-for="ex in examples"
@@ -189,14 +191,14 @@ function clearHistory() {
           <div class="flex justify-between items-center mb-3">
             <div class="flex items-center gap-2">
               <font-awesome-icon icon="history" class="w-3 text-text-muted" />
-              <h3 class="m-0 text-xs font-semibold uppercase tracking-wider text-text-muted">History</h3>
+              <h3 class="m-0 text-xs font-semibold uppercase tracking-wider text-text-muted">{{ t('query.history') }}</h3>
             </div>
             <button
               class="flex items-center gap-1 text-[10px] text-text-muted bg-transparent border-none cursor-pointer hover:text-red-400 transition-colors"
               @click="clearHistory"
             >
               <font-awesome-icon icon="broom" class="w-2.5" />
-              Clear
+              {{ t('query.clear') }}
             </button>
           </div>
           <button

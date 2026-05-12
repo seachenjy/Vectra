@@ -11,6 +11,7 @@ import {
   faChevronRight,
   faChevronDown,
   faFolder,
+  faGlobe,
   faSun,
   faMoon,
   faCircle,
@@ -48,6 +49,9 @@ import {
   faFilter,
   faCodeBranch,
   faArrowDown19,
+  faFileAlt,
+  faImage,
+  faUpload,
 } from '@fortawesome/free-solid-svg-icons'
 
 library.add(
@@ -99,4 +103,8 @@ library.add(
   faFilter,
   faCodeBranch,
   faArrowDown19,
+  faGlobe,
+  faFileAlt,
+  faImage,
+  faUpload,
 )

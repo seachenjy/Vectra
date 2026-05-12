@@ -17,6 +17,9 @@ struct Cli {
     #[arg(long, default_value_t = 128)]
     dimension: usize,
 
+    #[arg(long)]
+    hf_mirror: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -112,8 +115,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::Serve { addr } => {
+            let models_dir = std::path::PathBuf::from(&cli.dir).join("models");
             let namespaces = NamespaceManager::new(&cli.dir, cli.dimension)?;
-            let app = skymemory_api::build_router(namespaces, cli.dimension).await;
+            let app = skymemory_api::build_router(namespaces, cli.dimension, models_dir, cli.hf_mirror).await;
             println!("SkyMemory listening on http://{}", addr);
             let listener = tokio::net::TcpListener::bind(&addr).await?;
             axum::serve(listener, app).await?;
